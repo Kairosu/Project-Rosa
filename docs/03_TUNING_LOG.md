@@ -1,5 +1,25 @@
 # 03 · TUNING LOG
 
+## ⚡ CURRENT STATUS (update at every session end)
+
+**As of 2026-07-14, end of Phase 1 session 3:**
+- **Phase 0: GATE PASSED** (solo items; 2-client sanity ran together with Phase 1 work).
+- **Phase 1: all solo criteria pass.** Stands 5 min (soak: worst 1.41 stud/s, zero
+  drift), collapses limp, recovers, proportional shove response (hold / stagger /
+  ragdoll fall+rise). Falls are limp via the fall reflex; arms softened; stop-whip
+  fixed — **all three user-feel-confirmed.**
+- **Gate 1 OPEN on items 5–6 only:** observing-client readability + receive rate.
+  Needs the user to run Test → Clients and Servers → 2 Players, netsim 150 ms +
+  jitter + 2 % loss, SA Visualizer on. During that session, check whether
+  `list_roblox_studios` can see the test-server/client instances (open question from
+  04_PREFLIGHT §2). **User should publish the place at gate-pass.**
+- Next phase after that: **Phase 2 (balance & locomotion).**
+- All code lives in the repo (file sync); 4 commits pushed to GitHub main.
+- Read the two ☠️ workflow laws in CLAUDE.md § THE ENVIRONMENT before touching
+  anything: execute_luau VM isolation, and sync-verify (`script_grep`) before play.
+
+---
+
 ## WHY THIS FILE EXISTS
 
 This is a **coupled PD-controller system across 15 joints.** The stable region is found
@@ -242,7 +262,7 @@ wrists → **0.5**, damping 1.0 unchanged. Stand unaffected (max |v| 6.3 incl. a
 The instant capsule brake was whipping the 18.5-mass body forward-then-back on every
 stop. Feel verdict pending user playtest.
 
-**Verdict:** kept pending user feel-check
+**Verdict:** kept — user feel-checked all three ("looks good to go", 2026-07-14)
 **Observing-client check:** NOT RUN — still the open Gate 1 item
 
 ---
