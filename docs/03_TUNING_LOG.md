@@ -539,6 +539,36 @@ debugging?"):**
    restores to the attr, not a constant. Standing at SF=0 full tone already
    verified; next: walk/stairs at 5000/2500/0.
 
+**Addendum 3 (same day) — THE FROZEN PIN, root-caused by the recorder:**
+The user's first real capture showed the bug in full: body lying flat for
+seconds at MT=1.00, capsule "standing" (SF 10000, BMS 16, BMT 800), Rising=0
+— the fall machine believed all was well. Console had the missing link: **two
+stability-guard resets** during ordinary play (RightFoot w=516, RightHand
+w=333 tripped RUNAWAY_ANGULAR 250 during limp flops). The guard reset cleared
+the fall state but did NOT re-arm `fallArmed` — a reset that toppled after
+re-pinning landed in a state NO code path could ever leave: the frozen pin.
+1. **Guard reset now re-arms** (`fallArmed = true`, downHold = 0).
+2. **RUNAWAY_ANGULAR 250 → 800**: the guard catches explosions, not lively
+   ragdolls — 333/516 rad/s occur in ordinary user flops (measured).
+3. **Stranded catch-all (`FALL.strandedDown = 0.75`)**: ANY body down that
+   long at power triggers the full fall cycle regardless of arming. No
+   reachable state may lie powered on the ground — the class is self-healing
+   now, not just the known doors.
+4. **knockedDown no longer requires `fallArmed`** — the reflex is
+   upright-gated + rise-deaf so it can't loop on a lying body; wall hits
+   during the post-recovery window were being silently ignored
+   (user: "running into the wall no longer ragdolls" — partially this).
+5. **FS attribute** ("up"/"down"/"rising", server-mirrored on change) +
+   recorder columns Pwr/FS — server state machine is now visible in every
+   client capture.
+6. Insight from the failed disarm-window repro: `Rising` clears at the exact
+   step `fallArmed` re-arms (atomic) — so the rise fast-fail already covers
+   every topple between stand and re-arm (verified: 0.00 s release). The
+   guard reset was the ONLY door into disarmed+lying; it is closed and
+   backstopped.
+Verified: forced explosion-reset mid-fall → back standing armed (up 1.00,
+FS=up), next tilt releases in 0.03 s (old code: never — the eternal pin).
+
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items

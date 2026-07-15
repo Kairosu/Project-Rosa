@@ -18,9 +18,12 @@ local CONFIG = {
 	JOINT_ATTR_PREFIX = "MJ_",
 	-- master tone below this releases CCL balance so the body can actually heap
 	COLLAPSE_BALANCE_THRESHOLD = 0.1,
-	-- stability guard trip-wires; generous — a real fall is well under these
+	-- stability guard trip-wires. These catch EXPLOSIONS (NaN, compounding
+	-- runaway), not lively ragdolls: an ordinary user flop spun a foot at 516
+	-- and a hand at 333 rad/s (captured live), tripped the old 250, and the
+	-- mid-fall reset was the door into the frozen-pin deadlock.
 	RUNAWAY_LINEAR = 512,
-	RUNAWAY_ANGULAR = 250,
+	RUNAWAY_ANGULAR = 800,
 	-- impact reflex: the ball socket decouples body hits from the capsule, so passive
 	-- knockdowns don't exist — balance must DIP when the body takes a hit. Body-part
 	-- speed relative to the root above `threshold` dips balance torque linearly,
@@ -101,8 +104,17 @@ local CONFIG = {
 		-- riseRamp 4: at 6 the legs snap to full power while the feet catch the
 		-- ground and the rise becomes an 8-stud hop (verified live)
 		riseBoost = 4, riseRamp = 4, riseTimeout = 2.0, retryDown = 0.8,
+		-- stranded catch-all: a body down this long triggers the fall cycle
+		-- regardless of arming. NO reachable state may lie powered on the
+		-- ground — the frozen pin (lying at full tone, disarmed, forever) the
+		-- recorder caught got in through a guard reset mid-fall; this makes
+		-- the entire class self-healing instead of chasing each door.
+		strandedDown = 0.75,
 	},
 	RISING_ATTR = "Rising",
+	-- server-mirrored fall-machine state ("up"/"down"/"rising") so client-side
+	-- instruments (fall recorder) can see what the server THINKS it's doing
+	STATE_ATTR = "FS",
 	-- capsule feel knobs, live-tunable attributes (user feedback: stock turn speed 16
 	-- reads as pivoting an invisible core — the body never swings through a turn)
 	TURN_ATTR = "TS",

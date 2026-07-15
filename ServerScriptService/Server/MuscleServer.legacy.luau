@@ -44,6 +44,7 @@ type CharState = {
 	fallTimer: number, -- > 0 while limp from a fall
 	fallArmed: boolean, -- re-arms only after standing again, else lying re-triggers forever
 	upHold: number, -- continuous seconds spent upright
+	downHold: number, -- continuous seconds spent DOWN outside the fall cycle (stranded)
 	riseTimer: number, -- watchdog: a rise that never reaches upright retries the fall cycle
 	setupDone: boolean,
 	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
@@ -79,6 +80,7 @@ local function onCharacter(player: Player, character: Model)
 		fallTimer = 0,
 		fallArmed = true,
 		upHold = 0,
+		downHold = 0,
 		riseTimer = 0,
 		setupDone = false,
 		sprint = false,
@@ -175,6 +177,7 @@ local function simStep(_dt: number)
 		if st.fallTimer > 0 then
 			st.fallTimer -= dtStep
 			st.upHold = 0
+			st.downHold = 0
 			if st.fallTimer <= 0 then
 				-- limp period over: right the capsule (it fell with the body and
 				-- cannot right itself — see getUpAssist), then one boosted rise
@@ -206,18 +209,24 @@ local function simStep(_dt: number)
 					end
 				end
 			end
-			-- going down by TILT, or knocked down by a hard impact (wall crash /
-			-- massive hit): a deep reflex dip means the body cannot stay up — the
-			-- readable reaction is the tone crash, not the balance dip
+			-- three ways down: an ARMED tilt (the normal trip), a knockdown dip
+			-- (the reflex is upright-gated and rise-deaf, so it cannot loop on
+			-- a lying body — safe WITHOUT arming; wall hits during the disarm
+			-- window were silently ignored, user-reported), and the stranded
+			-- catch-all (down > strandedDown at full power = the frozen pin
+			-- the recorder caught — force the cycle, whatever the state)
 			local knockedDown = MuscleSystem.impactFactor(character) < MuscleSystem.CONFIG.IMPACT.knockdownFactor
+			st.downHold = if upY < FALL.tiltUp and character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) ~= true
+				then st.downHold + dtStep
+				else 0
 			if
-				st.fallArmed
-				and (upY < FALL.tiltUp or knockedDown)
+				((st.fallArmed and upY < FALL.tiltUp) or knockedDown or st.downHold >= FALL.strandedDown)
 				and st.settle == 0
 				and st.resetLock == 0
 				and character:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true
 			then
 				st.fallArmed = false
+				st.downHold = 0
 				st.fallTimer = FALL.downTime
 			end
 		end
@@ -250,8 +259,13 @@ local function simStep(_dt: number)
 				warn("[MuscleServer] stability guard: " .. offender .. " — resetting " .. player.Name)
 				character:SetAttribute(MuscleSystem.CONFIG.POWERED_ATTR, false)
 				-- a guard reset mid-fall must not leave the capsule released;
-				-- the per-step enforcement below restores it from this state
+				-- the per-step enforcement below restores it from this state.
+				-- MUST re-arm the trigger: a reset that landed badly with the
+				-- trigger disarmed was the door into the frozen pin (a body
+				-- lying at full tone forever, caught by the fall recorder)
 				st.fallTimer = 0
+				st.fallArmed = true
+				st.downHold = 0
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
 				for _, part in character:GetChildren() do
 					if part:IsA("BasePart") then
@@ -268,6 +282,12 @@ local function simStep(_dt: number)
 		-- body on a live capsule; the get-up keeps hover but not walking
 		local rising = character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true
 		MuscleSystem.setCapsuleReleased(character, st.fallTimer > 0, st.fallTimer > 0 or rising)
+
+		-- mirror the fall machine for client-side instruments (the recorder)
+		local fs = if st.fallTimer > 0 then "down" elseif rising then "rising" else "up"
+		if character:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR) ~= fs then
+			character:SetAttribute(MuscleSystem.CONFIG.STATE_ATTR, fs)
+		end
 
 		Locomotion.apply(character, st.sprint)
 		MuscleSystem.step(character)

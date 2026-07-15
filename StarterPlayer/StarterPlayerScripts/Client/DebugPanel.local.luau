@@ -61,7 +61,7 @@ local function recorderFreeze(reason: string)
 		v.Parent = ReplicatedStorage -- client-side only; read via the Client DM
 		recorder.value = v
 	end
-	local lines = { "reason=" .. reason .. "  cols: t hrpY pelvisY upY SF BMS BMT MT Rising speed" }
+	local lines = { "reason=" .. reason .. "  cols: t hrpY pelvisY upY SF BMS BMT MT Rising speed Pwr FS" }
 	for i = 1, recorder.count do
 		local idx = ((recorder.head - recorder.count + i - 1) % REC_WINDOW) + 1
 		table.insert(lines, recorder.buf[idx])
@@ -84,7 +84,7 @@ RunService.RenderStepped:Connect(function(dt)
 	local vel = hrp.AssemblyLinearVelocity
 	recorder.head = recorder.head % REC_WINDOW + 1
 	recorder.buf[recorder.head] = string.format(
-		"%.2f %.1f %.1f %.2f %d %d %d %.2f %d %.1f",
+		"%.2f %.1f %.1f %.2f %d %d %d %.2f %d %.1f %d %s",
 		recorder.clock,
 		hrp.Position.Y,
 		pelvis.Position.Y,
@@ -94,7 +94,9 @@ RunService.RenderStepped:Connect(function(dt)
 		(gc :: any).BalanceMaxTorque,
 		mt,
 		if char:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true then 1 else 0,
-		Vector3.new(vel.X, 0, vel.Z).Magnitude
+		Vector3.new(vel.X, 0, vel.Z).Magnitude,
+		if char:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true then 1 else 0,
+		tostring(char:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR))
 	)
 	recorder.count = math.min(recorder.count + 1, REC_WINDOW)
 	if mt < 0.5 and recorder.lastMT >= 0.5 and recorder.tail < 0 then
