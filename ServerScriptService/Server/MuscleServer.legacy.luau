@@ -10,6 +10,8 @@ local RunService = game:GetService("RunService")
 local MuscleSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MuscleSystem"))
 local Locomotion = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locomotion"))
 local PelvisDrive = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PelvisDrive"))
+local GetupPose = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GetupPose"))
+local PoseDriver = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PoseDriver"))
 
 -- body parts must never appear in the root's FloorSensor ray (see MuscleSystem.setupBody)
 pcall(function()
@@ -48,6 +50,8 @@ type CharState = {
 	downHold: number, -- continuous seconds spent DOWN outside the fall cycle (stranded)
 	torsoHold: number, -- continuous seconds the torso has left the pose (trip detector)
 	riseTimer: number, -- watchdog: a rise that never reaches upright retries the fall cycle
+	riseElapsed: number, -- getup clip clock, mirrored to the GT attribute
+	riseFails: number, -- consecutive failed physical get-ups (3 = loud last-resort assist)
 	setupDone: boolean,
 	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
 }
@@ -85,6 +89,8 @@ local function onCharacter(player: Player, character: Model)
 		downHold = 0,
 		torsoHold = 0,
 		riseTimer = 0,
+		riseElapsed = 0,
+		riseFails = 0,
 		setupDone = false,
 		sprint = false,
 	}
@@ -196,16 +202,20 @@ local function simStep(_dt: number)
 			st.downHold = 0
 			st.torsoHold = 0
 			if st.fallTimer <= 0 then
-				-- limp period over: right the capsule (it fell with the body and
-				-- cannot right itself — see getUpAssist), then one boosted rise
-				MuscleSystem.getUpAssist(character)
+				-- GETUP (Phase 3): NO teleport — the pose clip + tone ramp +
+				-- boosted pelvis springs push the body up from wherever and
+				-- however it actually lies. Face-up/down is latched by the
+				-- PoseDriver on state entry.
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
+				character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, 0)
 				st.riseTimer = FALL.riseTimeout
+				st.riseElapsed = 0
 			end
 		else
 			st.upHold = if upY > FALL.riseUp then st.upHold + dtStep else 0
 			if st.upHold >= FALL.riseHold and not st.fallArmed then
 				st.fallArmed = true
+				st.riseFails = 0
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
 			end
 			-- rise watchdog. A rise that TOPPLES has failed NOW — waiting out the
@@ -217,12 +227,33 @@ local function simStep(_dt: number)
 			-- still down genuinely failed and retries the down-and-right cycle.
 			if character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true then
 				st.riseTimer -= dtStep
-				if st.riseTimer <= 0 or upY < FALL.tiltUp then
+				st.riseElapsed += dtStep
+				character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, st.riseElapsed)
+				-- fast-fail only once the clip has had its runtime — early in
+				-- the clip the body is SUPPOSED to be low and tilted (tucking)
+				local clipDone = st.riseElapsed >= GetupPose.CONFIG.CLIP_TIME * 0.85
+				if st.riseTimer <= 0 or (clipDone and upY < FALL.tiltUp) then
 					if upY > FALL.riseUp then
 						st.riseTimer = 0.5
 					else
-						character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
-						st.fallTimer = FALL.retryDown
+						st.riseFails += 1
+						local riseCap = tonumber(character:GetAttribute(MuscleSystem.CONFIG.RISE_CAP_ATTR)) or 1
+						if st.riseFails >= 3 and riseCap > 0.8 then
+							-- the PHYSICAL get-up failed three straight times at
+							-- full allowed tone: last-resort assist, loudly — if
+							-- this fires in normal play, fix the clip/gains
+							warn("[MuscleServer] physical get-up failed x3 — assist pivot for " .. player.Name)
+							MuscleSystem.getUpAssist(character)
+							st.riseFails = 0
+							st.riseTimer = FALL.riseTimeout
+							st.riseElapsed = 0
+							character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, 0)
+						else
+							-- health/RC-capped failures buckle back down and
+							-- retry — that IS the intended read (Gate 3 item 3)
+							character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
+							st.fallTimer = FALL.retryDown
+						end
 					end
 				end
 			end
@@ -276,7 +307,13 @@ local function simStep(_dt: number)
 				end
 			end
 		end
-		st.mtTarget = if st.fallTimer > 0 then math.min(st.userMt, FALL.tone) else st.userMt
+		-- RC is a GLOBAL tone ceiling (health drives it in Phase 4; the slider
+		-- drives it for the Gate 3 buckle test). Capping only the ramp let a
+		-- lucky rise finish at full tone (verified: RC 0.4 stood, maxMT 1.0).
+		local riseCap = tonumber(character:GetAttribute(MuscleSystem.CONFIG.RISE_CAP_ATTR)) or 1
+		st.mtTarget = if st.fallTimer > 0
+			then math.min(st.userMt, FALL.tone)
+			else math.min(st.userMt, riseCap)
 
 		-- master tone: DOWN is instant (muscles switching off can't slingshot —
 		-- user felt the 0.6 s slew as knockdown lag), UP slews (snapping tone onto
@@ -340,8 +377,14 @@ local function simStep(_dt: number)
 			PelvisDrive.idle(character)
 		end
 
-		-- mirror the fall machine for client-side instruments (the recorder)
-		local fs = if st.fallTimer > 0 then "down" elseif rising then "rising" else "up"
+		-- the four-state machine (Phase 3), mirrored for both peers: drives the
+		-- leg dip (step), the flail (PoseDriver), the getup clip, and the
+		-- pelvis springs (PelvisDrive)
+		local fs = if st.fallTimer > 0
+			then "down"
+			elseif rising then "getup"
+			elseif MuscleSystem.impactFactor(character) < 1 then "stumble"
+			else "upright"
 		if character:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR) ~= fs then
 			character:SetAttribute(MuscleSystem.CONFIG.STATE_ATTR, fs)
 		end
@@ -351,6 +394,18 @@ local function simStep(_dt: number)
 		MuscleSystem.updateBalance(character)
 	end
 end
+
+-- getup clip + stumble flail live on the presentation timeline (PreSimulation),
+-- for every character this peer simulates — the server simulates all of them
+PoseDriver.wire(function()
+	local chars = {}
+	for _, st in charStates do
+		if st.character.Parent then
+			table.insert(chars, st.character)
+		end
+	end
+	return chars
+end)
 
 local ok, err = pcall(function()
 	(RunService :: any):BindToSimulation(simStep)

@@ -2,6 +2,28 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
+**As of 2026-07-15 (late): PHASE 3 BUILD COMPLETE, solo-verified. Awaiting
+user feel pass + the 2-client Gate 3 run.**
+- **The four-state machine is live** (FS: upright/stumble/down/getup), and the
+  get-up is PHYSICAL — the teleport pivot is a loud last-resort only (fired
+  once in ~15 knockdown cycles today, on a prone attempt).
+- Solo Gate 3 status: (1) falls from any angle ✓; (2) physical get-up both
+  orientations ✓ — supine 4.6 s/1 attempt, prone 8.2 s/3 attempts (works,
+  clip needs polish); (3) RC 0.4 → tries, buckles, never stands, recovers
+  instantly at RC 1 ✓; (4) stand-on-him DEFERRED to the 2-client run (solo
+  props slide off the light body — the spec's test is literally a player);
+  (5) observing-client = the netsim run.
+- **User pass items:** knockdown → watch him TUCK and PUSH himself up (no
+  teleport); get hit mid-run → stumble (knees soften, arms flail via IK) →
+  recover; RiseCap slider at 0.4 → he must visibly try-and-buckle; then the
+  2-client run: stand on him (he must NOT get up), observing-client
+  readability, recv KB/s number.
+- Known rough edges: prone get-up slower (clip iteration next session), jump
+  still dead, stairs unpolished, animations read confused during getup
+  (ability system thinks it's falling — cosmetic).
+
+---
+
 **As of 2026-07-15: Phase 0, 1, and 2 GATES PASSED. ARCHITECTURE PIVOTED.**
 - **GATE 2 PASSED** (user-run: full feel pass + 2-client netsim, "testing
   complete no issues"). Walks/runs clean, wall crash fells, trips fell

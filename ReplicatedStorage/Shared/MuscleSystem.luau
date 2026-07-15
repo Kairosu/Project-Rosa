@@ -35,7 +35,9 @@ local CONFIG = {
 	-- (stagger + rearm) — without it, crossing back over the upright gate while still
 	-- moving fast re-triggers the dip and the body struggles at the boundary forever.
 	IMPACT = {
-		threshold = 25, fallAt = 55, staggerTime = 0.6, uprightGate = 0.7, rearm = 2.0,
+		-- staggerTime 0.8 = the STUMBLE window (Phase 3 spec: ~0.8 s where you
+		-- might recover, arms flailing, legs soft)
+		threshold = 25, fallAt = 55, staggerTime = 0.8, uprightGate = 0.7, rearm = 2.0,
 		-- self-motion gates: a fast 180° turn swings the body around the capsule at
 		-- up to ~53 stud/s relative (measured live — far MORE than a hard crate
 		-- hit), and the swing PEAKS just after the turn ends, exactly when the
@@ -114,10 +116,15 @@ local CONFIG = {
 		-- fully going over while the capsule stayed pinned (user: "still pins
 		-- briefly"). Successful rises hold upY ≥ 0.94 (telemetry), so 0.65 does
 		-- not false-fail them.
-		tiltUp = 0.65, tone = 0.08, downTime = 1.6, riseUp = 0.85, riseHold = 1.5,
-		-- riseRamp 4: at 6 the legs snap to full power while the feet catch the
-		-- ground and the rise becomes an 8-stud hop (verified live)
-		riseBoost = 4, riseRamp = 4, riseTimeout = 2.0, retryDown = 0.8,
+		-- tone 0 (Phase 3 spec): DOWN is a HEAP. The old 0.08 existed for the
+		-- capsule's collapse threshold, which pelvis mode retired.
+		tiltUp = 0.65, tone = 0, downTime = 1.6, riseUp = 0.85, riseHold = 1.5,
+		-- riseRamp 3 (Phase 3): tone must LEAD the clip — with the quadratic
+		-- torque ceiling, a slow ramp (1.5) left the tuck phase at crippled
+		-- ceilings and full-tone rises needed 3 attempts (verified). At 3 the
+		-- muscles are full by 0.33 s and the clip does the rest. riseTimeout
+		-- must stay longer than GetupPose.CONFIG.CLIP_TIME.
+		riseBoost = 4, riseRamp = 3, riseTimeout = 2.2, retryDown = 0.8,
 		-- committed-topple trigger: tilted past tipUp AND tipping faster than
 		-- tipRate (rad/s, horizontal axes) = it is going over NOW. Both gates
 		-- together cannot false-fire on AccelerationLean or normal wobble.
@@ -142,9 +149,15 @@ local CONFIG = {
 		strandedDown = 0.75,
 	},
 	RISING_ATTR = "Rising",
-	-- server-mirrored fall-machine state ("up"/"down"/"rising") so client-side
-	-- instruments (fall recorder) can see what the server THINKS it's doing
+	-- the four-state machine (Phase 3), server-mirrored for both peers and
+	-- every instrument: "upright" / "stumble" / "down" / "getup"
 	STATE_ATTR = "FS",
+	-- GETUP tone ceiling (Phase 4 wires health into this; the Gate 3 buckle
+	-- test drives it by slider): the ramp can never exceed it
+	RISE_CAP_ATTR = "RC",
+	-- STUMBLE: legs go soft (scaled by the impact dip, floored so a stumble
+	-- reads as buckling knees, not paralysis)
+	STUMBLE_LEG_FLOOR = 0.4,
 	-- capsule feel knobs, live-tunable attributes (user feedback: stock turn speed 16
 	-- reads as pivoting an invisible core — the body never swings through a turn)
 	TURN_ATTR = "TS",
@@ -230,6 +243,7 @@ function MuscleSystem.isValidAttr(key: string): boolean
 		or key == CONFIG.TURN_ATTR
 		or key == CONFIG.LEAN_ATTR
 		or key == CONFIG.STAND_ATTR
+		or key == CONFIG.RISE_CAP_ATTR
 	then
 		return true
 	end
@@ -252,6 +266,9 @@ function MuscleSystem.clampAttr(key: string, value: number): number
 	end
 	if key == CONFIG.STAND_ATTR then
 		return math.clamp(value, 0, 20000)
+	end
+	if key == CONFIG.RISE_CAP_ATTR then
+		return math.clamp(value, 0, 1)
 	end
 	local lim = CONFIG.LIMITS[key:sub(-1)]
 	return math.clamp(value, lim[1], lim[2])
@@ -341,6 +358,9 @@ function MuscleSystem.ensureDefaults(character: Model)
 	if character:GetAttribute(CONFIG.STAND_ATTR) == nil then
 		character:SetAttribute(CONFIG.STAND_ATTR, CONFIG.STAND_FORCE)
 	end
+	if character:GetAttribute(CONFIG.RISE_CAP_ATTR) == nil then
+		character:SetAttribute(CONFIG.RISE_CAP_ATTR, 1)
+	end
 	for _, j in MuscleSystem.JOINTS do
 		local attr = MuscleSystem.jointAttr(j)
 		if character:GetAttribute(attr) == nil then
@@ -357,6 +377,7 @@ function MuscleSystem.applyDebugWrite(character: Model, key: string, value: numb
 		or key == CONFIG.TURN_ATTR
 		or key == CONFIG.LEAN_ATTR
 		or key == CONFIG.STAND_ATTR
+		or key == CONFIG.RISE_CAP_ATTR
 	then
 		character:SetAttribute(key, value)
 		return
@@ -383,6 +404,12 @@ function MuscleSystem.step(character: Model)
 	local mt = tonumber(character:GetAttribute(CONFIG.MASTER_TONE_ATTR)) or 1
 	local values = MuscleSystem.getValues(character)
 	local wantKinematic = not powered
+	-- STUMBLE (Phase 3): the LEGS go soft while the dip lasts — knees buckle,
+	-- the body scrambles. Arms stay at tone (they're busy flailing).
+	local legTone = 1
+	if character:GetAttribute(CONFIG.STATE_ATTR) == "stumble" then
+		legTone = math.max(MuscleSystem.impactFactor(character), CONFIG.STUMBLE_LEG_FLOOR)
+	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any
 		-- spawn-flow property stomp (ENGINE_FACTS field reports)
@@ -391,11 +418,18 @@ function MuscleSystem.step(character: Model)
 		end
 		if powered then
 			local v = values[name]
-			-- tone scales strength AND ceiling: a weak muscle both tracks slower and
-			-- cannot hold weight (01_ARCHITECTURE). Damping is ζ — never tone-scaled.
-			joint.AngularStrength = v[1] * mt
+			local jointTone = mt
+			if legTone < 1 and (name:find("Hip") or name:find("Knee") or name:find("Ankle")) then
+				jointTone *= legTone
+			end
+			-- tone scales strength linearly and the CEILING quadratically: a
+			-- weak muscle tracks slower AND loses force disproportionately
+			-- (this curve is what makes a 0.4-tone get-up BUCKLE while a
+			-- full-tone one is untouched — verified live: linear ceilings let
+			-- 40% legs stand up every time). Damping is ζ — never tone-scaled.
+			joint.AngularStrength = v[1] * jointTone
 			joint.AngularDamping = v[2]
-			joint.MaxTorque = v[3] * mt
+			joint.MaxTorque = v[3] * jointTone * jointTone
 		end
 	end
 end

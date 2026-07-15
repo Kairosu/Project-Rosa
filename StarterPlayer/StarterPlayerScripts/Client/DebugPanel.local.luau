@@ -35,6 +35,7 @@ local balanceState = Iris.State(MuscleSystem.CONFIG.BALANCE_TORQUE)
 local turnState = Iris.State(MuscleSystem.CONFIG.TURN_SPEED)
 local leanState = Iris.State(MuscleSystem.CONFIG.ACCEL_LEAN)
 local standState = Iris.State(MuscleSystem.CONFIG.STAND_FORCE)
+local riseCapState = Iris.State(1)
 local lastPowered = false
 
 -- fall recorder: a ring buffer of what THIS CLIENT actually rendered — the
@@ -138,6 +139,7 @@ local function reread(char: Model?)
 		turnState:set(attrOr(char, MuscleSystem.CONFIG.TURN_ATTR, MuscleSystem.CONFIG.TURN_SPEED))
 		leanState:set(attrOr(char, MuscleSystem.CONFIG.LEAN_ATTR, MuscleSystem.CONFIG.ACCEL_LEAN))
 		standState:set(attrOr(char, MuscleSystem.CONFIG.STAND_ATTR, MuscleSystem.CONFIG.STAND_FORCE))
+		riseCapState:set(attrOr(char, MuscleSystem.CONFIG.RISE_CAP_ATTR, 1))
 	end
 end
 
@@ -219,6 +221,13 @@ Iris:Connect(function()
 	local stand = Iris.SliderNum({ "StandForce (hover)", 100, 0, 20000 }, { number = standState })
 	if stand.numberChanged() then
 		remote:FireServer(MuscleSystem.CONFIG.STAND_ATTR, standState:get())
+	end
+
+	-- Gate 3 buckle test: cap the getup tone ramp (0.4 = tries, fails, goes
+	-- back down). Phase 4 wires health into the same attribute.
+	local rise = Iris.SliderNum({ "RiseCap", 0.01, 0, 1 }, { number = riseCapState })
+	if rise.numberChanged() then
+		remote:FireServer(MuscleSystem.CONFIG.RISE_CAP_ATTR, riseCapState:get())
 	end
 
 	Iris.SeparatorText({ "locomotion A/B" })

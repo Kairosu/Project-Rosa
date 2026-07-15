@@ -20,6 +20,9 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local MuscleSystem = require(script.Parent:WaitForChild("MuscleSystem"))
+local GetupPose = require(script.Parent:WaitForChild("GetupPose"))
+
 local CONFIG = {
 	MODE_ATTR = "PelvisMode",
 	REMOTE_KEY = "PELVIS",
@@ -35,10 +38,16 @@ local CONFIG = {
 	YAW_K = 35, YAW_D = 6,
 	-- drive toward MovingDirection * SPEED (* the Running SpeedMultiplier)
 	DRIVE_K = 5, DRIVE_CAP = 70, SPEED = 16,
-	-- while Rising the support and upright caps multiply: at normal caps the
-	-- spring cannot right a lying body dragging sprawled limbs (verified —
-	-- fell clean, never rose). Same idea as the capsule's riseBoost.
-	RISE_BOOST = 2.5,
+	-- rise assist multiplier. 2.5 was the pre-clip crutch (a bare spring
+	-- cannot right a lying body); WITH the GetupPose clip the legs and arms do
+	-- the real work and the assist is 1 (none) — which is exactly what lets a
+	-- health-capped ramp genuinely buckle (Gate 3 item 3: at RC 0.4 with
+	-- boost, clip + 40% legs still stood — verified live, twice).
+	RISE_BOOST = 1,
+	-- getup support height: the pelvis is pulled from crouch height to stand
+	-- height ACROSS the clip, so the body rises through the sequence instead
+	-- of popping to full hover
+	CROUCH = 1.0,
 }
 
 local PelvisDrive = {}
@@ -135,18 +144,33 @@ function PelvisDrive.step(character: Model, _dt: number)
 	local v = pelvis.AssemblyLinearVelocity
 	local w = pelvis.AssemblyAngularVelocity
 	local move = (cm :: any).MovingDirection :: Vector3
-	local boost = if character:GetAttribute("Rising") == true then CONFIG.RISE_BOOST else 1
+	-- boost scales with tone SQUARED: at full tone the assist is full (4.5 g
+	-- cap); at tone 0.4 the support lands under body weight (0.89 g) and the
+	-- rise genuinely BUCKLES — linear scaling still carried a 0.4-tone body
+	-- up (verified live, Gate 3 item 3 failed). Crossover ≈ tone 0.45.
+	local rising = character:GetAttribute("Rising") == true
+	local boost = if rising then 1 + (CONFIG.RISE_BOOST - 1) * mt * mt else 1
 
-	-- input only counts while the fall machine says UP: drive on a downed or
+	-- input only counts while the fall machine says so: drive on a downed or
 	-- half-risen body drags it around and wedges the get-up (user-reported)
-	local fs = character:GetAttribute("FS")
-	local driveOK = fs == nil or fs == "up"
+	local fs = character:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR)
+	local driveOK = fs == nil or fs == "upright" or fs == "stumble"
+
+	-- getup: support height climbs across the clip — crouch to stand
+	local height = CONFIG.HEIGHT
+	if fs == "getup" then
+		local t = tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0
+		height = CONFIG.CROUCH + (CONFIG.HEIGHT - CONFIG.CROUCH) * GetupPose.progress(t)
+	end
 
 	local force = Vector3.zero
 	local hit = Workspace:Raycast(pelvis.Position, Vector3.new(0, -CONFIG.RAY, 0), r.params)
 	if hit then
-		-- support: carries the whole chain through the joints, like legs would
-		local err = CONFIG.HEIGHT - (pelvis.Position.Y - hit.Position.Y)
+		-- support: carries the whole chain through the joints, like legs would.
+		-- (A tone² cap here was tried for the buckle test and reverted: it
+		-- strangled FULL-tone rises mid-ramp — the buckle lives in the muscle
+		-- torque ceiling now, where the architecture doc always put it.)
+		local err = height - (pelvis.Position.Y - hit.Position.Y)
 		local fy = m * (g + err * CONFIG.HOVER_K - v.Y * CONFIG.HOVER_D)
 		force = Vector3.new(0, math.clamp(fy, 0, m * g * CONFIG.HOVER_CAP_G * mt * boost), 0)
 		-- drive, grounded only
@@ -164,9 +188,12 @@ function PelvisDrive.step(character: Model, _dt: number)
 	end
 	r.vf.Force = force
 
-	-- compliant upright spring: axis = up × Y rights it, sin(tilt)-weighted
+	-- compliant upright spring: axis = up × Y rights it, sin(tilt)-weighted.
+	-- STUMBLE dips it with the impact factor — a hit genuinely wobbles the
+	-- body now (this is the pelvis-mode half of the stagger system)
+	local dip = math.max(MuscleSystem.impactFactor(character), MuscleSystem.CONFIG.IMPACT.knockdownFactor)
 	local up = pelvis.CFrame.UpVector
-	local torque = (up:Cross(Vector3.yAxis) * CONFIG.UP_K * boost - Vector3.new(w.X, 0, w.Z) * CONFIG.UP_D) * m
+	local torque = (up:Cross(Vector3.yAxis) * CONFIG.UP_K * boost * dip - Vector3.new(w.X, 0, w.Z) * CONFIG.UP_D) * m
 	local mh = Vector3.new(move.X, 0, move.Z)
 	if driveOK and mh.Magnitude > 0.1 then
 		local look = pelvis.CFrame.LookVector

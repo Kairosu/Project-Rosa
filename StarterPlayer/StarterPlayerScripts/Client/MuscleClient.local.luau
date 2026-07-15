@@ -10,6 +10,7 @@ local RunService = game:GetService("RunService")
 local MuscleSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MuscleSystem"))
 local Locomotion = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locomotion")) -- key watch + remote only
 local PelvisDrive = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PelvisDrive"))
+local PoseDriver = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PoseDriver"))
 
 local player = Players.LocalPlayer
 
@@ -29,6 +30,13 @@ local function simStep(_dt: number)
 		end
 	end
 end
+
+-- getup clip + stumble flail for the LOCAL (predicted) character only; other
+-- characters' poses arrive via replication
+PoseDriver.wire(function()
+	local character = player.Character
+	return if character then { character } else {}
+end)
 
 -- sprint INTENT to the server, outside the sim step (a remote fired inside
 -- BindToSimulation would re-fire on every rollback resimulation)
