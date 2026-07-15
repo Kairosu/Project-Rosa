@@ -9,6 +9,7 @@ local RunService = game:GetService("RunService")
 
 local MuscleSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MuscleSystem"))
 local Locomotion = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locomotion"))
+local PelvisDrive = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PelvisDrive"))
 
 -- body parts must never appear in the root's FloorSensor ray (see MuscleSystem.setupBody)
 pcall(function()
@@ -60,7 +61,7 @@ remote.OnServerEvent:Connect(function(player, key: unknown, value: unknown)
 	if type(key) ~= "string" or type(value) ~= "number" or value ~= value then
 		return
 	end
-	if key == Locomotion.CONFIG.REMOTE_KEY then
+	if key == Locomotion.CONFIG.REMOTE_KEY or key == PelvisDrive.CONFIG.REMOTE_KEY then
 		table.insert(pending, { player = player, key = key, value = if value == 1 then 1 else 0 })
 		return
 	end
@@ -113,6 +114,8 @@ local function simStep(_dt: number)
 		if st and st.character.Parent then
 			if w.key == Locomotion.CONFIG.REMOTE_KEY then
 				st.sprint = w.value == 1
+			elseif w.key == PelvisDrive.CONFIG.REMOTE_KEY then
+				st.character:SetAttribute(PelvisDrive.CONFIG.MODE_ATTR, w.value == 1)
 			elseif w.key == MuscleSystem.CONFIG.MASTER_TONE_ATTR then
 				st.userMt = w.value -- slewed below, never stepped
 			else
@@ -174,7 +177,13 @@ local function simStep(_dt: number)
 		-- tone restores after downTime, and restoring tone is also what lifts him back
 		local FALL = MuscleSystem.CONFIG.FALL
 		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		local upY = if hrp then hrp.CFrame.UpVector.Y else 1
+		-- pelvis mode: the capsule is a dangling ghost — the PELVIS is the
+		-- posture truth for every fall/rise decision
+		local pelvisMode = character:GetAttribute(PelvisDrive.CONFIG.MODE_ATTR) == true
+		local upPart: BasePart? = if pelvisMode
+			then (character:FindFirstChild("LowerTorso") :: BasePart?) or hrp
+			else hrp
+		local upY = if upPart then upPart.CFrame.UpVector.Y else 1
 		local dtStep = if type(_dt) == "number" then _dt else 1 / 60
 		if st.fallTimer > 0 then
 			st.fallTimer -= dtStep
@@ -311,9 +320,20 @@ local function simStep(_dt: number)
 		end
 
 		-- enforced every step so no transition or ability stomp can strand a limp
-		-- body on a live capsule; the get-up keeps hover but not walking
+		-- body on a live capsule; the get-up keeps hover but not walking.
+		-- Pelvis mode keeps the capsule permanently released (input conduit
+		-- only) and drives the body directly.
 		local rising = character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true
-		MuscleSystem.setCapsuleReleased(character, st.fallTimer > 0, st.fallTimer > 0 or rising)
+		MuscleSystem.setCapsuleReleased(
+			character,
+			pelvisMode or st.fallTimer > 0,
+			pelvisMode or st.fallTimer > 0 or rising
+		)
+		if pelvisMode then
+			PelvisDrive.step(character, dtStep)
+		else
+			PelvisDrive.idle(character)
+		end
 
 		-- mirror the fall machine for client-side instruments (the recorder)
 		local fs = if st.fallTimer > 0 then "down" elseif rising then "rising" else "up"

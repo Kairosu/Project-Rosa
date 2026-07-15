@@ -12,6 +12,7 @@ local Stats = game:GetService("Stats")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Iris = require(Shared:WaitForChild("Iris")) :: any
 local MuscleSystem = require(Shared:WaitForChild("MuscleSystem"))
+local PelvisDrive = require(Shared:WaitForChild("PelvisDrive"))
 
 local CONFIG = {
 	STRENGTH_MAX = 2, -- phase spec range; Roblox warns >1 can destabilize
@@ -218,6 +219,13 @@ Iris:Connect(function()
 	local stand = Iris.SliderNum({ "StandForce (hover)", 100, 0, 20000 }, { number = standState })
 	if stand.numberChanged() then
 		remote:FireServer(MuscleSystem.CONFIG.STAND_ATTR, standState:get())
+	end
+
+	Iris.SeparatorText({ "locomotion A/B" })
+	local pelvisOn = char:GetAttribute(PelvisDrive.CONFIG.MODE_ATTR) == true
+	Iris.Text({ "mode: " .. (if pelvisOn then "PELVIS-DRIVEN (spike)" else "CCL capsule") })
+	if Iris.Button({ if pelvisOn then "Switch to capsule" else "Switch to pelvis-driven" }).clicked() then
+		remote:FireServer(PelvisDrive.CONFIG.REMOTE_KEY, if pelvisOn then 0 else 1)
 	end
 
 	Iris.SeparatorText({ "fall recorder (client-side truth)" })

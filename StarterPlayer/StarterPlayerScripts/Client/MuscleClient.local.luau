@@ -9,6 +9,7 @@ local RunService = game:GetService("RunService")
 
 local MuscleSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MuscleSystem"))
 local Locomotion = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locomotion")) -- key watch + remote only
+local PelvisDrive = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PelvisDrive"))
 
 local player = Players.LocalPlayer
 
@@ -22,6 +23,10 @@ local function simStep(_dt: number)
 		-- as separate attribute-change events and the ability multiplies on each.
 		MuscleSystem.step(character)
 		MuscleSystem.updateBalance(character)
+		-- pelvis mode predicts the same forces the server applies
+		if character:GetAttribute(PelvisDrive.CONFIG.MODE_ATTR) == true then
+			PelvisDrive.step(character, if type(_dt) == "number" then _dt else 1 / 60)
+		end
 	end
 end
 

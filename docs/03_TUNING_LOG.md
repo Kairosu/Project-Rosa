@@ -611,6 +611,39 @@ gyroscope, not a spring). Consequences:
   still 0.75 at release — the old path would still have been waiting.
   Clean recovery to stand afterwards (FS=up, MT 1.0).
 
+**Addendum 6 (same day) — random falls while sprinting + THE PELVIS SPIKE.**
+User: "still falls randomly when running around, didn't hit anything."
+1. **Measured: sprint STRAFES whip the body to rel ~70** (vs hit threshold
+   25/fallAt 55) — the dip escalation had unmasked animation/locomotion whip
+   as "hits". No threshold separates self-motion from impacts at speed.
+   Structural fix: **falls require a cause** — the body-rel channel AND the
+   trip detector only fire within `contactWindow` (0.5 s) of a FOREIGN touch
+   on a non-leg part (`MuscleSystem.recentContact`; feet/shins excluded —
+   they touch the world constantly). Walls keep the decel channel, true tilt
+   stays contact-free. Verified: identical sprint+strafe pattern (rel 70.2)
+   → zero falls, balance never dipped; crate trip → release in 0.165 s.
+   Also: swing-scaled hit line (`swingPerSpeed 0.7`), torsoTime 0.15 → 0.1,
+   and the capsule inherits the pelvis's downward velocity at release (the
+   hover-zero lag read as onset pin).
+2. **PELVIS-DRIVEN LOCOMOTION SPIKE IS LIVE** (`Shared/PelvisDrive.luau`,
+   panel "locomotion A/B" toggle, remote "PELVIS", attr "PelvisMode").
+   Compliant forces on the LowerTorso — hover spring (cap 1.8 g × tone),
+   upright torque spring (COMPLIANT, tone-scaled — the anti-gyroscope), yaw
+   toward MovingDirection, drive toward input × 16 × SpeedMultiplier.
+   Capsule stays permanently released as input conduit (MovingDirection
+   flows ✓ verified); HRP rides as ghost. Fall machine reads the PELVIS for
+   posture in this mode. RISE_BOOST 2.5 on spring+caps while Rising (without
+   it: fell clean, never rose — verified).
+   **First-gains results (HOVER 30/9 cap 1.8 g · UP 55/10 cap 120 · YAW 35/6
+   · DRIVE 5 cap 70): stands dead-stable (support force = body weight,
+   3935 ≈ 20 m × g), walks 16.8 max with minUp 0.96 (it LEANS — alive),
+   full knockdown cycle fell 0.35 s / heap flat / stable stand 4.60 s.**
+   Known spike gaps: jump dead (Jumping ability drove the capsule), stairs
+   likely bad (single-ray hover doesn't step-climb), sprint multiplier
+   unconfirmed in this mode (keyboard burst died; links verified
+   individually), stock animations may look confused (ability state machine
+   thinks it's falling). A/B verdict + netsim decide the pivot.
+
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items
