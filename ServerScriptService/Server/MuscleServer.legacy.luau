@@ -202,10 +202,15 @@ local function simStep(_dt: number)
 			st.downHold = 0
 			st.torsoHold = 0
 			if st.fallTimer <= 0 then
-				-- GETUP (Phase 3): NO teleport — the pose clip + tone ramp +
-				-- boosted pelvis springs push the body up from wherever and
-				-- however it actually lies. Face-up/down is latched by the
-				-- PoseDriver on state entry.
+				-- GETUP (Phase 3): NO teleport — IK plant targets + tone ramp
+				-- + pelvis springs push the body up from wherever and however
+				-- it actually lies. Face-up/down is latched HERE, by the
+				-- server, so every peer keys the same choreography (a
+				-- per-peer pelvis read could disagree at the threshold).
+				local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
+				if pelvis then
+					character:SetAttribute(GetupPose.CONFIG.FACE_ATTR, GetupPose.isFaceUp(pelvis))
+				end
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
 				character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, 0)
 				st.riseTimer = FALL.riseTimeout

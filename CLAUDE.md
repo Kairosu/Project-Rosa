@@ -174,11 +174,13 @@ is worth nothing.
   **No `.Touched:Connect` in there either** (engine error, verified live 15 JUL —
   it also aborts the rest of that sim step). `task.defer` the wiring off the
   simulation timeline.
-- **Joint `Transform` writes are SERVER-only, and only win while animation tracks
-  are STOPPED** (stop them yourself — deterministically, not via the FallingDown
-  accident). On the SA-predicted client, script Transform writes are a placebo from
-  every hook. The actor's own client renders server-posed states (getup) limp, as
-  replicated physics. Full law: ENGINE_FACTS §1 "TRANSFORM OWNERSHIP UNDER SA".
+- **Script pose control is dead under SA except through IKControl.** Client
+  Transform writes are a placebo from every hook; server writes lose to any playing
+  track; runtime AnimationTracks are zombies (the SA Animate module owns playback,
+  numeric asset ids only); SetPredictionMode(Off) doesn't change the local
+  character's rendering. Layer-1 intent that must render on every peer is IK
+  effector goals computed identically from replicated state (the getup does this).
+  Full law: ENGINE_FACTS §1 "TRANSFORM OWNERSHIP UNDER SA".
 - Comments explain *why*, never *what*.
 - If a magic number exists, it goes in a `CONFIG` table at the top of the file, and
   it gets an Iris slider.

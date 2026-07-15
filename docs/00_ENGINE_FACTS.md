@@ -107,7 +107,7 @@ end)
 ```
 
 ### ☠️ TRANSFORM OWNERSHIP UNDER SA — the doc above LIES in practice (verified 15 JUL 2026)
-Four instrumented live rounds (force-writes + end-of-frame reads, both DMs):
+Instrumented live rounds (force-writes + end-of-frame reads, both DMs):
 
 1. **With ANY animation track playing, the Animator's apply lands AFTER every
    script hook** — `PreSimulation` AND `BindToSimulation`, on BOTH peers. A
@@ -117,18 +117,37 @@ Four instrumented live rounds (force-writes + end-of-frame reads, both DMs):
    a track's output; it does not hold for replacing it.)
 2. **On the SA-predicted client, script `Transform` writes NEVER survive the
    frame** — tracks playing or not, any hook (60° force-writes read back 0 at
-   Heartbeat, every frame, both hooks tested). Layer-1 pose writes are
-   **SERVER-ONLY**. The actor's own client must read a server-posed body the
-   way observers do: as replicated physics (limp muscles = no tug-of-war).
-3. **Humanoid state replicates server→client and the platform ability scripts
+   Heartbeat, every frame, both hooks tested). And a server-only pose with a
+   LIMP client is not the answer either: prediction diverges and the SA
+   corrections whip 15 zero-ceiling parts — measured 65 % whip-frames vs the
+   server's 14.5 % (the "possessed spasm"). See law 6 for the actual channel.
+3. **Runtime AnimationTracks are DEAD on SA characters.**
+   `RegisterKeyframeSequence`/`RegisterAnimationClip` register fine (bare hash
+   id, round-trips, `Length` loads on a real rig) — but script `Play()` is a
+   zombie on BOTH peers, every timeline (weight and TimePosition frozen at 0;
+   a real uploaded asset id script-played dies the same way). The character's
+   `Animate` is an SA-rollback module ("[AnimRepl]") that drives ALL playback
+   deterministically from state attributes on HRP/Humanoid — and that state
+   carries **numeric asset ids only**. Only its own pipeline plays tracks.
+4. **Humanoid state replicates server→client and the platform ability scripts
    drive it via `ChangeState`**, which bypasses `SetStateEnabled` — client-side
    `SetStateEnabled` is a no-op in practice, and `FallingDown` fires
-   engine-side on knockovers. `FallingDown` stops all animation tracks (that
-   accident is the ONLY reason early clip tests "worked" server-side). If a
-   pose write must win, STOP THE TRACKS yourself, deterministically.
-4. **Client-side `SetAttribute` on a server-replicated character is reverted
-   by the server sync within a frame.** Client-local sim state must be
-   computed, never written to shared attributes.
+   engine-side on knockovers, stopping all animation tracks.
+5. **`SetPredictionMode(instance, Off)` did NOT change the local character's
+   rendering** — called client-side or server-side, model or per-part, no
+   error, no observable effect (whip metric unchanged). Prediction for your
+   own character is effectively not optional. Also: client-side `SetAttribute`
+   on a server-replicated character is reverted by the server sync within a
+   frame — client-local sim state must be computed, never written.
+6. **✅ IKCONTROL IS THE ONE CROSS-PEER TARGET CHANNEL.** A server-created
+   `IKControl` (instances replicate) modifies joint Transform targets through
+   the engine's own animation layer on EVERY peer — verified live: weight 1
+   put the client's shoulder target at 82° and the hand 0.5 studs from the
+   goal, stable, while raw Transform writes read back 0. Layer-1 intent that
+   must render on every screen is expressed as IK effector goals computed
+   identically on all peers from replicated state (the Phase 3 getup does
+   exactly this). Matched targets + matched tone schedule = no correction war
+   (client whip-frames 65 % → 34.7 %, client/server motion ratio 5.5× → 1.7×).
 
 ### 🔴 KNOWN ISSUE — the #1 risk of this project. Read it.
 > *"In some situations, players can see **choppy physics replication on other characters**.

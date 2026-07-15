@@ -2,6 +2,26 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
+**As of 2026-07-15 (later night): GETUP IS NOW IK PLANT CHOREOGRAPHY
+(Addendum 9). The limp-client design below read as a "possessed spasm"
+(user-reported, then measured: 65 % whip-frames on the actor's screen vs the
+server's 14.5 % — SA corrections whipping zero-ceiling joints). Every
+mitigation was measured and failed (tone floors, SetPredictionMode both
+sides, runtime AnimationTracks — all in the whip table, Addendum 9); the fix
+is the one target channel the engine applies on every peer: IKControl. Hands
+plant on the ground beside the hips, feet plant under the body, both peers
+compute identical goals from GT/GF — matched targets + matched tone schedule,
+client whips 65 % → 34.7 %, client/server motion ratio 5.5× → 1.7×. The
+joint-space clip is deleted (git @ c75f542 keeps it); the buckle mechanism is
+untouched. Kept from Addendum 8: rise-fail all-part velocity bleed,
+FallingDown→Running enforcement (walking fix, user-confirmed "okay better").
+NEEDS: user eyes-test (does the spasm read as gone? do the plants read as
+pushing?), face-UP getup eyeball (this session's crates all landed him
+prone), then the 2-client Gate 3 run.**
+
+---
+
+*(superseded by Addendum 9 — kept for the record)*
 **As of 2026-07-15 (night): PHASE 3 REWIRED after the user's regression report
 — the getup clip was NEVER VISIBLE on the actor's own screen. Root cause found
 by live instrumentation (Addendum 8, and the new ☠️ Transform-ownership law in
@@ -11,10 +31,7 @@ server-only clip + server stops tracks during down/getup + actor's client goes
 muscle-limp during getup (reads the rise as replicated physics, like the down
 phase always has) + rise-fail pelvis-velocity bleed (kills the "flung inverted
 between attempts" hit) + per-step FallingDown→Running enforcement while upright
-(kills the post-fall jittery/fall-anim walk). Retested by instrument same
-night: actor's-eye getup organic, buckle transitions clean, post-fall walking
-clean. NEEDS: user solo feel pass (eyes on the getup + walking), then the
-2-client Gate 3 run.**
+(kills the post-fall jittery/fall-anim walk).**
 
 ---
 
@@ -831,3 +848,62 @@ Running events)?
   fully normal. (2) GT attr stays stale between falls (harmless, writes are
   FS-gated). (3) `script_grep` can lag `script_read` after rapid file edits —
   trust script_read when they disagree.
+
+## ADDENDUM 9 — 15 JUL (late night): the "possessed" getup → IK plant redesign
+
+**User report on the Addendum-8 build:** "spasms… looks like he's being
+possessed, goes crazy and eventually gets to the standing position."
+
+**Metric built for this hunt** (the whip meter): per-Heartbeat displacement of
+LeftHand/RightFoot while FS == getup; a frame is a "whip" above 0.35 studs
+(legit rise motion ≈ 0.05–0.15). All rounds: thrown-crate knockdowns, Studio
+solo (RTT ≈ 0 — every number below gets WORSE with real latency).
+
+| build | client mean | client whips | notes |
+|---|---|---|---|
+| clip + limp client (Add. 8) | 0.897 | 65 % | the user's spasm |
+| + client tone floor 0.3 | 0.519 | 42 % | attr A/B |
+| + client tone floor 0.6 | 0.359 | 36 % | best mitigation |
+| + SetPredictionMode Off (client) | 0.713 | 56 % | no effect |
+| + SetPredictionMode Off (server, per-part) | 0.771 | 53 % | no effect |
+| **IK plant getup (this commit)** | **0.428** | **34.7 %** | motion now MEANS something |
+| server truth (clip build) | 0.162 | 14.5 % | what observers see |
+| server truth (IK build) | 0.249 | 21.5 % | livelier — muscles strain at plants |
+
+Client/server motion ratio: 5.5× (limp) → **1.7× (IK)** — the correction war
+is mostly gone; what remains on the actor's screen is largely real physics.
+
+**Why every mitigation failed** (all laws in ENGINE_FACTS §1, verified live):
+client Transform writes never survive; runtime AnimationTracks are zombies on
+both peers (the SA "[AnimRepl]" Animate module owns all playback from rollback
+state attributes, NUMERIC asset ids only — temp-registered clips can never
+ride it); SetPredictionMode(Off) has no observable effect on the local
+character; tone floors only damp the whip, they can't remove the divergence.
+The spasm mechanism: at tone 0 the QUADRATIC ceiling is 0, so limp joints have
+no damping authority and SA corrections whip free-swinging parts every frame.
+
+**The fix — matched targets + matched impedance:** IKControl is the ONE
+target channel the engine applies on every peer (verified: client shoulder
+target 82°, hand 0.5 studs from goal, vs Transform writes reading back 0).
+The getup is now IK PLANT CHOREOGRAPHY (PoseDriver): GetupHandL/R (UpperArm→
+Hand) plant on the ground beside the hips, GetupFootL/R (UpperLeg→Foot) plant
+under the body — ground-anchored world targets computed identically on both
+peers from GT/GF + the pelvis frame + a per-peer raycast. Weights slew at 6/s;
+hands release at 75 % progress, feet at 97 %. The joint-space keyframe clip is
+DELETED (git history @ c75f542 keeps it); GetupPose is now just the shared
+clock (GT), the server-latched face flag (GF, set at the rise moment), and
+progress(). Both peers run the full tone schedule again (no client limp, no
+CGF knob). The BUCKLE is untouched: muscles still physically strain toward
+the plants through the tone² ceiling (measured: hand 1.43 studs short of its
+plant mid-rise at full tone — Layer 2 doing real work).
+
+**IK plant values (first pass, all in PoseDriver CONFIG):** HAND_SIDE 0.85 ·
+HAND_BACK 0.25 (behind pelvis face-up, ahead face-down) · FOOT_SIDE 0.35 ·
+FOOT_FWD 0.55 (×0.4 face-down) · LIFT 0.12 · WEIGHT_RATE 6 · SMOOTH 0.1 ·
+HANDS_OFF 0.75 · FEET_OFF 0.97 · RAY 6.
+
+**Open items:** user eyes-test (both orientations — this session's crate
+rounds landed face-down every time, GF=false; face-up path is code-shared but
+unwatched); rise reliability unchanged (2–3 attempts typical); the arms may
+read "reachy" instead of "pushy" (Position IK doesn't know about pressing —
+tune HAND_BACK/HANDS_OFF first); netsim numbers at 150 ms still unknown.
