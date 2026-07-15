@@ -170,6 +170,9 @@ is worth nothing.
 - Modules are `PascalCase` ModuleScripts. They return a table. No OOP ceremony.
 - **No `wait()`. No `spawn()`.** Use `task.*`.
 - **No yielding inside `BindToSimulation`.** It will error. See ENGINE_FACTS.
+  **No `.Touched:Connect` in there either** (engine error, verified live 15 JUL —
+  it also aborts the rest of that sim step). `task.defer` the wiring off the
+  simulation timeline.
 - Comments explain *why*, never *what*.
 - If a magic number exists, it goes in a `CONFIG` table at the top of the file, and
   it gets an Iris slider.

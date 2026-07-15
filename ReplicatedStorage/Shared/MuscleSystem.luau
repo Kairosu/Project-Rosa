@@ -502,14 +502,26 @@ function MuscleSystem.getUpAssist(character: Model)
 			part.AssemblyAngularVelocity = Vector3.zero
 		end
 	end
-	local look = hrp.CFrame.LookVector
+	-- pelvis mode: the ghost HRP's frame is meaningless after a ragdoll (it
+	-- spins freely on the socket) — orienting the pivot by it landed the body
+	-- sideways/tangled and the rise pinned (user-reported). The PELVIS is the
+	-- reference, and the pivot places the PELVIS at the target.
+	local pelvisMode = character:GetAttribute("PelvisMode") == true
+	local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
+	local ref: BasePart = if pelvisMode and pelvis then pelvis else hrp
+	local look = ref.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	flat = if flat.Magnitude > 0.1 then flat.Unit else Vector3.new(0, 0, -1)
 	-- +3.0: high enough that the sprawled limbs mostly clear the ground while the
 	-- muscles yank them to pose — snagged limbs transmit >StandForce through the
 	-- socket and flop the capsule back down (main first-attempt failure mode)
-	local base = Vector3.new(hrp.Position.X, hrp.Position.Y + 3.0, hrp.Position.Z)
-	character:PivotTo(CFrame.lookAt(base, base + flat))
+	local base = Vector3.new(ref.Position.X, ref.Position.Y + 3.0, ref.Position.Z)
+	local target = CFrame.lookAt(base, base + flat)
+	if ref == hrp then
+		character:PivotTo(target)
+	else
+		character:PivotTo(target * ref.CFrame:Inverse() * character:GetPivot())
+	end
 end
 
 -- CCL balance follows tone, always compliant (never rigid — see setupBody note).
@@ -599,15 +611,22 @@ local function ensureTouchArming(character: Model)
 		return
 	end
 	touchWired[character] = true
-	for _, p in character:GetChildren() do
-		if p:IsA("BasePart") and not TOUCH_EXCLUDE[p.Name] then
-			p.Touched:Connect(function(other)
-				if other and not other:IsDescendantOf(character) then
-					touchArm[character] = os.clock()
-				end
-			end)
+	-- ☠️ `.Touched:Connect` is FORBIDDEN inside simulation callbacks (engine
+	-- error, verified live — and it silently killed the whole contact gate:
+	-- the error aborted wiring once per spawn and recentContact returned
+	-- false forever). recentContact is called from the sim step, so the
+	-- wiring hops off the simulation timeline first.
+	task.defer(function()
+		for _, p in character:GetChildren() do
+			if p:IsA("BasePart") and not TOUCH_EXCLUDE[p.Name] then
+				p.Touched:Connect(function(other)
+					if other and not other:IsDescendantOf(character) then
+						touchArm[character] = os.clock()
+					end
+				end)
+			end
 		end
-	end
+	end)
 end
 
 -- both peers: has a non-leg body part touched something foreign recently?

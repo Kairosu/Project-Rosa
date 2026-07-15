@@ -644,6 +644,32 @@ User: "still falls randomly when running around, didn't hit anything."
    individually), stock animations may look confused (ability state machine
    thinks it's falling). A/B verdict + netsim decide the pivot.
 
+**Addendum 7 (2026-07-15) — USER A/B VERDICT + the dead contact gate.**
+**User: "Pelvis driven feels way better — walking feels a lot less like it's
+fighting itself, and it doesn't pin when hitting a wall."** The remaining
+pelvis-mode complaint (occasional get-up pin) + one console error, all fixed:
+1. **☠️ `.Touched:Connect` is FORBIDDEN inside simulation callbacks** (engine
+   error, user-captured). ensureTouchArming ran from noteImpact inside the
+   sim step → the error aborted wiring once per spawn AND killed the rest of
+   that sim step → the whole contact gate was silently DEAD server-side
+   (recentContact always false — capsule-mode prop trips couldn't fire at
+   all; pelvis-mode falls still worked because the pelvis physically tips
+   through the contact-free tilt path). Fix: `task.defer` the wiring off the
+   sim timeline. Law added to CLAUDE.md next to the no-yield rule.
+   Verified: crate trip releases in 0.218 s, console clean.
+2. **Pelvis-mode get-up pinned because getUpAssist oriented by the GHOST
+   HRP's frame** — after a ragdoll the ghost is spun arbitrarily on the
+   socket, so the "upright" pivot could land the body sideways/tangled.
+   Now the PELVIS is the reference and the pivot places the PELVIS at the
+   target (delta transform). Also: PelvisDrive ignores input (drive + yaw)
+   unless FS == "up" — driving a half-risen body dragged/wedged it.
+   Verified: two consecutive pelvis knockdown cycles, both **fell 0.05 s /
+   stable stand 3.15 s** — faster and now perfectly repeatable (was 4.6 s
+   with occasional pin).
+**Next: 2-client netsim A/B (observing-client readability) → pivot decision
+→ if pelvis wins, docs update (00_ENGINE_FACTS locomotion section, CLAUDE.md
+scope line) and the capsule path becomes legacy.**
+
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items

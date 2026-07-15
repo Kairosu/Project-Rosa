@@ -137,6 +137,11 @@ function PelvisDrive.step(character: Model, _dt: number)
 	local move = (cm :: any).MovingDirection :: Vector3
 	local boost = if character:GetAttribute("Rising") == true then CONFIG.RISE_BOOST else 1
 
+	-- input only counts while the fall machine says UP: drive on a downed or
+	-- half-risen body drags it around and wedges the get-up (user-reported)
+	local fs = character:GetAttribute("FS")
+	local driveOK = fs == nil or fs == "up"
+
 	local force = Vector3.zero
 	local hit = Workspace:Raycast(pelvis.Position, Vector3.new(0, -CONFIG.RAY, 0), r.params)
 	if hit then
@@ -149,7 +154,7 @@ function PelvisDrive.step(character: Model, _dt: number)
 		if r.running then
 			mult = tonumber(r.running:GetAttribute("SpeedMultiplier")) or 1
 		end
-		local target = Vector3.new(move.X, 0, move.Z) * CONFIG.SPEED * mult
+		local target = if driveOK then Vector3.new(move.X, 0, move.Z) * CONFIG.SPEED * mult else Vector3.zero
 		local fd = (target - Vector3.new(v.X, 0, v.Z)) * m * CONFIG.DRIVE_K
 		local dcap = m * CONFIG.DRIVE_CAP * mt
 		if fd.Magnitude > dcap then
@@ -163,7 +168,7 @@ function PelvisDrive.step(character: Model, _dt: number)
 	local up = pelvis.CFrame.UpVector
 	local torque = (up:Cross(Vector3.yAxis) * CONFIG.UP_K * boost - Vector3.new(w.X, 0, w.Z) * CONFIG.UP_D) * m
 	local mh = Vector3.new(move.X, 0, move.Z)
-	if mh.Magnitude > 0.1 then
+	if driveOK and mh.Magnitude > 0.1 then
 		local look = pelvis.CFrame.LookVector
 		local lh = Vector3.new(look.X, 0, look.Z)
 		if lh.Magnitude > 0.1 then
