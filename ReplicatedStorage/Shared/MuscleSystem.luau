@@ -432,7 +432,10 @@ function MuscleSystem.step(character: Model)
 			return x * x * (3 - 2 * x)
 		end
 		legF = 0.45 + 0.55 * ease(0.15, 0.5)
-		spineF = 0.35 + 0.65 * ease(0.3, 0.75)
+		-- spine firms LAST and LATE (was 0.3–0.75): with full spine tone
+		-- arriving before the clip ends, the final straighten snapped to the
+		-- idle pose — the tail of the "quick get into place" read
+		spineF = 0.35 + 0.65 * ease(0.35, 0.9)
 	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any

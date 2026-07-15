@@ -928,3 +928,15 @@ first (downward dog). v2:
   0.6 s post-clip grace.
 Untested by instrument (user was already in a play session) — user verdict
 pending on: bridge gone? press-up reads? retry count down?
+
+**Addendum 9 · v2 verdicts + terminal-pop fix (user: "doesn't do the retry
+thing anymore but still has kind of the quick get into place after it pushes
+for a bit"):** retries FIXED by the v2 choreography. The terminal pop was the
+end-of-clip pile-up: the p² hover curve ends at MAX slope right as the plants
+release and full-tone muscles snap to idle. Two-value fix:
+- hover height curve p² → **p³(4−3p)** (PelvisDrive): still low early
+  (0.08 vs 0.09 at p=0.3), near-zero slope at the end — the rise SETTLES.
+- spine tone ease 0.3–0.75 → **0.35–0.9** (MuscleSystem): the straighten is
+  the spine unfurling through the clip tail, not snapping before it ends.
+Sanity crate after the change: ONE attempt, hit→standing 3.7 s, height
+settles 2.88→2.83. riseTimeout 2.6 / CLIP_TIME 2.0 confirmed compatible.
