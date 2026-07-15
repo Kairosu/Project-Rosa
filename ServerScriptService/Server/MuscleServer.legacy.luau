@@ -44,6 +44,7 @@ type CharState = {
 	fallTimer: number, -- > 0 while limp from a fall
 	fallArmed: boolean, -- re-arms only after standing again, else lying re-triggers forever
 	upHold: number, -- continuous seconds spent upright
+	riseTimer: number, -- watchdog: a rise that never reaches upright retries the fall cycle
 	setupDone: boolean,
 	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
 }
@@ -78,6 +79,7 @@ local function onCharacter(player: Player, character: Model)
 		fallTimer = 0,
 		fallArmed = true,
 		upHold = 0,
+		riseTimer = 0,
 		setupDone = false,
 		sprint = false,
 	}
@@ -174,14 +176,34 @@ local function simStep(_dt: number)
 			st.fallTimer -= dtStep
 			st.upHold = 0
 			if st.fallTimer <= 0 then
-				-- limp period over: one boosted, committed rise
+				-- limp period over: right the capsule (it fell with the body and
+				-- cannot right itself — see getUpAssist), then one boosted rise
+				MuscleSystem.getUpAssist(character)
+				MuscleSystem.setCapsuleReleased(character, false)
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
+				st.riseTimer = FALL.riseTimeout
 			end
 		else
 			st.upHold = if upY > FALL.riseUp then st.upHold + dtStep else 0
 			if st.upHold >= FALL.riseHold and not st.fallArmed then
 				st.fallArmed = true
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
+			end
+			-- rise watchdog: when the clock runs out, check posture — an upright
+			-- body just needs more time for upHold to clear Rising (a blind retry
+			-- here knocked down SUCCESSFUL stands, verified live); a body still
+			-- on the ground genuinely failed and retries the down-and-right cycle
+			if character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true then
+				st.riseTimer -= dtStep
+				if st.riseTimer <= 0 then
+					if upY > FALL.riseUp then
+						st.riseTimer = 0.5
+					else
+						character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
+						MuscleSystem.setCapsuleReleased(character, true)
+						st.fallTimer = FALL.retryDown
+					end
+				end
 			end
 			-- going down by TILT, or knocked down by a hard impact (wall crash /
 			-- massive hit): a deep reflex dip means the body cannot stay up — the
@@ -196,14 +218,26 @@ local function simStep(_dt: number)
 			then
 				st.fallArmed = false
 				st.fallTimer = FALL.downTime
+				-- the hips go down WITH the body (user feedback: limbs ragdolled
+				-- but still standing and walkable = broken)
+				MuscleSystem.setCapsuleReleased(character, true)
 			end
 		end
 		st.mtTarget = if st.fallTimer > 0 then math.min(st.userMt, FALL.tone) else st.userMt
 
-		-- master tone slews toward its target every step
+		-- master tone: DOWN is instant (muscles switching off can't slingshot —
+		-- user felt the 0.6 s slew as knockdown lag), UP slews (snapping tone onto
+		-- a displaced body slingshots it, 539 stud/s measured — the original law).
+		-- While Rising the up-ramp is fast: the capsule was just righted with
+		-- velocities zeroed, and at 1.5/s the limp body pulls it back down first.
 		local mtNow = tonumber(character:GetAttribute(MuscleSystem.CONFIG.MASTER_TONE_ATTR)) or 1
-		if mtNow ~= st.mtTarget then
-			local stepSize = CONFIG.MT_RAMP_PER_SECOND * (if type(_dt) == "number" then _dt else 1 / 60)
+		if st.mtTarget < mtNow then
+			character:SetAttribute(MuscleSystem.CONFIG.MASTER_TONE_ATTR, st.mtTarget)
+		elseif mtNow ~= st.mtTarget then
+			local rate = if character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true
+				then FALL.riseRamp
+				else CONFIG.MT_RAMP_PER_SECOND
+			local stepSize = rate * (if type(_dt) == "number" then _dt else 1 / 60)
 			local newMt = mtNow + math.clamp(st.mtTarget - mtNow, -stepSize, stepSize)
 			character:SetAttribute(MuscleSystem.CONFIG.MASTER_TONE_ATTR, newMt)
 		end
@@ -217,6 +251,10 @@ local function simStep(_dt: number)
 			if offender then
 				warn("[MuscleServer] stability guard: " .. offender .. " — resetting " .. player.Name)
 				character:SetAttribute(MuscleSystem.CONFIG.POWERED_ATTR, false)
+				-- a guard reset mid-fall must not leave the capsule released
+				st.fallTimer = 0
+				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
+				MuscleSystem.setCapsuleReleased(character, false)
 				for _, part in character:GetChildren() do
 					if part:IsA("BasePart") then
 						part.AssemblyLinearVelocity = Vector3.zero

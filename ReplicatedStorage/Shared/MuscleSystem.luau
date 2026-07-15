@@ -40,6 +40,10 @@ local CONFIG = {
 		-- and it STAYS deaf for turnCooldown afterwards. The speed-EMA gate covers
 		-- straight-line launch/brake transients the same way.
 		selfOmega = 3, selfAccel = 250, selfSpeedDelta = 10, turnCooldown = 0.4,
+		-- fully deaf while Rising and for riseGrace after: the get-up swings body
+		-- parts far past every threshold, and a reflex that fires on the recovery
+		-- knocks the body straight back down (verified live — rise→fall loop)
+		riseGrace = 1.0,
 		-- a dip this deep is a KNOCKDOWN: the server triggers the fall reflex
 		-- (tone crash → crumple → limp → rise). Balance dip alone can NEVER
 		-- topple the capsule on a wall hit — the Root socket absorbs the body's
@@ -72,8 +76,21 @@ local CONFIG = {
 	-- riseHold: must stay upright this long before the fall trigger re-arms.
 	-- tone 0.08, deliberately BELOW COLLAPSE_BALANCE_THRESHOLD (0.1): during the
 	-- limp window the capsule must give up too, or an upright knockdown (wall
-	-- crash) leaves him slumped-but-standing at balance 120 (verified live)
-	FALL = { tiltUp = 0.55, tone = 0.08, downTime = 1.6, riseUp = 0.85, riseHold = 0.5, riseBoost = 4 },
+	-- crash) leaves him slumped-but-standing at balance 120 (verified live).
+	-- riseHold 1.5: with the capsule now truly falling, rises wobble — 0.5 s of
+	-- upright re-armed the tilt trigger mid-wobble and re-felled him (verified).
+	-- riseRamp: while Rising, tone ramps fast (the capsule was just righted with
+	-- velocities zeroed, so joint-space error is rotation, not stretch — the
+	-- slingshot hazard needs a stretched constraint); at the normal 1.5/s the
+	-- limp body yanks the righted capsule back down before tone arrives.
+	-- riseTimeout/retryDown: a failed rise must retry the whole down-and-right
+	-- cycle, or a bad landing deadlocks lying at full tone (verified).
+	FALL = {
+		tiltUp = 0.55, tone = 0.08, downTime = 1.6, riseUp = 0.85, riseHold = 1.5,
+		-- riseRamp 4: at 6 the legs snap to full power while the feet catch the
+		-- ground and the rise becomes an 8-stud hop (verified live)
+		riseBoost = 4, riseRamp = 4, riseTimeout = 2.0, retryDown = 0.8,
+	},
 	RISING_ATTR = "Rising",
 	-- per-joint driver defaults {strength, damping, torque}. Baseline = AJU factory
 	-- values (tuning log 2026-07-14). Root-ward joints get extra damping per the official
@@ -335,6 +352,49 @@ function MuscleSystem.setupBody(character: Model): boolean
 	return ok
 end
 
+-- server, at fall/rise transitions: a limp body's capsule must actually GO DOWN.
+-- StandForce=0 kills the hover (the legs no longer hold anything at fall tone) and
+-- BaseMoveSpeed=0 kills walking-while-ragdolled. Verified live: with these released
+-- the whole body heaps INCLUDING the hips (hrpY 4.8 → 1.4); without them the body
+-- dangles from a hovering, walkable capsule (the "standing marionette" bug).
+function MuscleSystem.setCapsuleReleased(character: Model, released: boolean)
+	local cm = character:FindFirstChildOfClass("ControllerManager")
+	local gc = cm and cm:FindFirstChildWhichIsA("GroundController", true)
+	if not cm or not gc then
+		return
+	end
+	pcall(function()
+		(gc :: any).StandForce = if released then 0 else 10000;
+		(cm :: any).BaseMoveSpeed = if released then 0 else 16
+	end)
+end
+
+-- server, once at the rise moment: a capsule that fell with the body lies flat, its
+-- floor sensor points sideways, and the GroundController can never right it again
+-- (verified live: stuck lying with Rising=true forever). Until Phase 3's physical
+-- get-up, the server rights the capsule in one pivot — velocities zeroed, yaw kept —
+-- and the muscles pull the body up from there.
+function MuscleSystem.getUpAssist(character: Model)
+	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return
+	end
+	for _, part in character:GetChildren() do
+		if part:IsA("BasePart") then
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+	local look = hrp.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	flat = if flat.Magnitude > 0.1 then flat.Unit else Vector3.new(0, 0, -1)
+	-- +3.0: high enough that the sprawled limbs mostly clear the ground while the
+	-- muscles yank them to pose — snagged limbs transmit >StandForce through the
+	-- socket and flop the capsule back down (main first-attempt failure mode)
+	local base = Vector3.new(hrp.Position.X, hrp.Position.Y + 3.0, hrp.Position.Z)
+	character:PivotTo(CFrame.lookAt(base, base + flat))
+end
+
 -- CCL balance follows tone, always compliant (never rigid — see setupBody note).
 -- Below the collapse threshold the capsule gives up entirely and falls with the body.
 function MuscleSystem.updateBalance(character: Model)
@@ -393,6 +453,7 @@ local impactState: { [Model]: { factor: number, timer: number } } = setmetatable
 local lastHVel: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
 local slowSpeed: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 local turnDeaf: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local riseGrace: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 
 function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 	local st = impactState[character]
@@ -421,6 +482,14 @@ function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 	slowSpeed[character] = slow
 
 	local imp = CONFIG.IMPACT
+	-- deaf during recovery: while Rising and for a grace period after (get-up
+	-- motion exceeds every impact threshold and must never re-fell the body)
+	local grace = riseGrace[character] or 0
+	grace = if character:GetAttribute(CONFIG.RISING_ATTR) == true then imp.riseGrace else math.max(grace - dt, 0)
+	riseGrace[character] = grace
+	if grace > 0 then
+		return
+	end
 	-- only a STANDING body can be knocked off balance; while tilted or rising the
 	-- reflex stays silent so it cannot sabotage its own recovery
 	if hrp.CFrame.UpVector.Y < imp.uprightGate then

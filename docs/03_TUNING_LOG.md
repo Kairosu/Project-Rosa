@@ -2,20 +2,25 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
-**As of 2026-07-14, end of Phase 2 session 1:**
+**As of 2026-07-14, end of Phase 2 session 2:**
 - **Phase 0: GATE PASSED. Phase 1: GATE PASSED** (2-client netsim, user-verified).
 - **Phase 2 build COMPLETE, solo-verified.** Sprint (LeftShift, 16→25.5 measured),
-  wall-crash knockdown (sprint→wall = tone crash→limp→rise, full cycle in server
-  telemetry), live BT balance knob + panel slider, DecelerationTime, void reset,
-  setupBody race fix. Stock Animate module handles walk/run clips under SA
-  (Animation Graph beta not needed — evaluated, skipped).
+  wall-crash knockdown, live BT balance knob + panel slider, DecelerationTime,
+  void reset, setupBody race fix. Stock Animate module handles walk/run clips
+  under SA (Animation Graph beta not needed — evaluated, skipped).
+- **Session 2 (user feedback pass): falls now take the HIPS down too.** Capsule
+  releases during the limp window (no more ragdolled-but-standing, no more
+  walking-while-down), knockdown is instant (asymmetric tone slew), rise is an
+  assisted capsule pivot + fast tone ramp with a posture-checking watchdog.
+  Two full knockdown cycles verified: heap flat → stable stand in ≈3.5 s.
 - **User playtest items for Gate 2** (feel checks, minutes of play):
-  1. Sprint feel (hold LeftShift) — speed + anim look.
-  2. Sprint into the SprintWall — should read as a crash: crumple limp against
-     the wall, ~1.6 s down, one committed rise. (Capsule stays planted — the
-     full slide-down-the-wall needs Phase 3's DOWN state; known, logged.)
-  3. Walk up/down the stairs — watch for jitter.
-  4. Walk-stop feel (DecelerationTime 0→0.2 is new since the last feel pass).
+  1. Get knocked down (sprint into the SprintWall / crate shove) — whole body
+     including hips should heap, ~1.6 s down, scramble back up. The get-up is an
+     assisted pivot until Phase 3 — functional, not beautiful, expect a bounce.
+  2. Confirm you can NOT walk while down.
+  3. Sprint feel (hold LeftShift) — speed + anim look.
+  4. Walk up/down the stairs — watch for jitter.
+  5. Walk-stop feel (DecelerationTime 0→0.2 is new since the last feel pass).
 - **Then the Gate 2 netsim run** (2 players, 150 ms + jitter + 2 % loss):
   observing-client readability of all of the above, **numeric recv KB/s**
   (carried from Gate 1 — note it from the panel), and check whether
@@ -383,5 +388,52 @@ reflexes above) is the frozen baseline. Phase 2 begins.
 
 **Verdict:** kept — pending user feel pass + Gate 2 netsim run
 **Observing-client check:** NOT RUN — the Gate 2 items
+
+---
+
+## 2026-07-14 — Phase 2 (session 2) — real falls: the capsule goes down too
+
+**User feedback driving this session:** knockdown reaction delayed; "ragdolled but
+still standing" — limbs limp while the hips stay pinned upright and WALKABLE.
+Both confirmed and fixed; two knockdown cycles verified end-to-end (heap at
+hrpY 0.4 → stable stand ≈3.5 s later, repeatable).
+
+**The fixes, in dependency order:**
+1. **Asymmetric master-tone slew**: DOWN is instant (muscles switching off can't
+   slingshot — the 0.6 s up-slew was the perceived knockdown lag), UP stays
+   slewed. While `Rising`, the up-ramp runs at **riseRamp 4**/s (6 made the legs
+   snap to power while the feet caught ground → an 8-stud hop, verified).
+2. **Capsule release** (`MuscleSystem.setCapsuleReleased`): while `fallTimer` is
+   live, `GroundController.StandForce = 0` and `BaseMoveSpeed = 0` — the hips
+   fall WITH the body (hrpY 4.8 → 1.4 verified) and walking-while-ragdolled is
+   impossible. Restored at the rise.
+3. **Get-up assist** (`MuscleSystem.getUpAssist`): a capsule that fell with the
+   body lies flat, its floor sensor points sideways, and the GroundController
+   can NEVER right it (verified: stuck lying forever). Until Phase 3's physical
+   get-up: one server-side pivot — velocities zeroed, yaw kept, pelvis lifted
+   +3.0 (at +2.5 sprawled limbs snag the ground and flop the capsule back).
+4. **Rise watchdog** (riseTimeout 2.0, retryDown 0.8): a failed rise retries the
+   whole down-and-right cycle. MUST check posture at expiry — a blind retry
+   knocked down successful stands (verified).
+5. **riseGrace 1.0 + riseHold 1.5**: the impact reflex is fully deaf while
+   Rising and for 1 s after — get-up motion exceeds every impact threshold and
+   re-felled the body in a loop (verified); and 0.5 s of upright re-armed the
+   tilt trigger mid-wobble (verified).
+
+**Engine facts (verified live, all dead ends — do not revisit):**
+- `Humanoid:ChangeState(Physics)` is a NO-OP under the CCL ability state
+  machine — state reverts to Running the same frame.
+- Writing ability `SyncedState` attributes (`Active`/`Enabled`) from outside
+  the AbilityManagerActor changes the attributes and nothing else.
+- `StandForce = 0` alone does nothing at full tone — the LEGS hold the capsule
+  through the Root socket; hover only matters once the body is limp.
+- A direct `SetAttribute("MT", x)` from an execute is overwritten by the server
+  slew loop within a step — force limpness via impulse-triggered reflex or the
+  remote, never by poking MT.
+
+**Verdict:** kept — awaiting user feel pass (knockdown → heap → scramble-up;
+the get-up is an assisted pivot until Phase 3, expect it to read as functional,
+not beautiful)
+**Observing-client check:** NOT RUN — Gate 2 items
 
 ---
