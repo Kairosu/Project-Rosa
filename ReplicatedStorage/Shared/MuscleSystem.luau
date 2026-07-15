@@ -63,11 +63,13 @@ local CONFIG = {
 	-- vs ~130 for a DecelerationTime-smoothed stop. Dip severity scales with the
 	-- speed thrown away: walking into a wall (16) is nothing, sprinting (25.6) is
 	-- a real stagger.
-	-- speedFallAt 26: a full sprint (25.6) into a wall drops balance to ~zero —
-	-- the wall blocks a forward TIP, so the readable reaction is the body
-	-- crumpling against it and the fall reflex taking over. A jog (~19) is a
-	-- bobble, a walk (16) is nothing.
-	WALL = { accelMin = 400, speedMin = 18, speedFallAt = 26 },
+	-- speedMin 17 / speedFallAt 22: with knockdownFactor 0.45 the knockdown
+	-- starts at ~20 stud/s. The old 18–26 band left mid-speed wall hits as
+	-- deep staggers — body slumped against the wall, hips held at standing
+	-- height, walkable: the user's recurring "pinned into the wall by the
+	-- hips". Walls are binary now: a walk-speed bump (16) is nothing, a brisk
+	-- jog (≥20) or sprint puts you DOWN.
+	WALL = { accelMin = 400, speedMin = 17, speedFallAt = 22 },
 	-- the capsule brakes/launches instantly by default; the heavy body keeps its
 	-- momentum and whips on every transition (user feedback). Symmetric smoothing
 	-- removes the whip AND keeps normal stops out of the wall channel.
@@ -107,6 +109,12 @@ local CONFIG = {
 	LEAN_ATTR = "AL",
 	TURN_SPEED = 8, -- cm.BaseTurnSpeed; stock 16
 	ACCEL_LEAN = 1, -- gc.AccelerationLean; stock 1
+	-- hover ladder knob: how much of the body's weight the capsule carries.
+	-- Standing holds at 0 with full tone (verified — the LEGS hold the capsule
+	-- through the Root socket), so this is the experiment lane toward
+	-- leg-supported locomotion: lower it, walk, find where it breaks.
+	STAND_ATTR = "SF",
+	STAND_FORCE = 10000,
 	-- per-joint driver defaults {strength, damping, torque}. Baseline = AJU factory
 	-- values (tuning log 2026-07-14). Root-ward joints get extra damping per the official
 	-- anti-oscillation recipe: they don't "see" downstream chain mass.
@@ -179,6 +187,7 @@ function MuscleSystem.isValidAttr(key: string): boolean
 		or key == CONFIG.BALANCE_ATTR
 		or key == CONFIG.TURN_ATTR
 		or key == CONFIG.LEAN_ATTR
+		or key == CONFIG.STAND_ATTR
 	then
 		return true
 	end
@@ -198,6 +207,9 @@ function MuscleSystem.clampAttr(key: string, value: number): number
 	end
 	if key == CONFIG.LEAN_ATTR then
 		return math.clamp(value, 0, 4)
+	end
+	if key == CONFIG.STAND_ATTR then
+		return math.clamp(value, 0, 20000)
 	end
 	local lim = CONFIG.LIMITS[key:sub(-1)]
 	return math.clamp(value, lim[1], lim[2])
@@ -284,6 +296,9 @@ function MuscleSystem.ensureDefaults(character: Model)
 	if character:GetAttribute(CONFIG.LEAN_ATTR) == nil then
 		character:SetAttribute(CONFIG.LEAN_ATTR, CONFIG.ACCEL_LEAN)
 	end
+	if character:GetAttribute(CONFIG.STAND_ATTR) == nil then
+		character:SetAttribute(CONFIG.STAND_ATTR, CONFIG.STAND_FORCE)
+	end
 	for _, j in MuscleSystem.JOINTS do
 		local attr = MuscleSystem.jointAttr(j)
 		if character:GetAttribute(attr) == nil then
@@ -299,6 +314,7 @@ function MuscleSystem.applyDebugWrite(character: Model, key: string, value: numb
 		or key == CONFIG.BALANCE_ATTR
 		or key == CONFIG.TURN_ATTR
 		or key == CONFIG.LEAN_ATTR
+		or key == CONFIG.STAND_ATTR
 	then
 		character:SetAttribute(key, value)
 		return
@@ -406,7 +422,8 @@ function MuscleSystem.setCapsuleReleased(character: Model, released: boolean, mo
 	end
 	pcall(function()
 		local g, m = gc :: any, cm :: any
-		local force = if released then 0 else 10000
+		-- restore value comes from the SF attr (hover-ladder slider), not a constant
+		local force = if released then 0 else (tonumber(character:GetAttribute(CONFIG.STAND_ATTR)) or CONFIG.STAND_FORCE)
 		local speed = if released or moveLock then 0 else 16
 		if g.StandForce ~= force then
 			g.StandForce = force

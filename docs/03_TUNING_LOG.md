@@ -15,15 +15,20 @@
   capsule release now enforced every step; walking locked during the get-up;
   turn speed halved (BaseTurnSpeed 16→8) for the ice-skate pivot feel.
 - **User playtest items for Gate 2** (feel checks, minutes of play):
-  1. Turn feel — new **TurnSpeed slider** (default 8, stock was 16) and
-     **AccelLean slider** in the panel. Tune live until turning stops feeling
-     like pivoting an invisible core; report the values that feel right.
-  2. Knockdowns (wall sprint / crate shove) — body + hips heap together, no
-     lingering ragdolled-but-standing or walkable-while-limp states. Get-up is
-     still an assisted pivot (Phase 3 makes it physical); you cannot walk until
-     fully back up (~1.5 s after standing) — say if that lockout feels too long.
-  3. Moderate hits/bumps now read as a firm wobble, not a floppy collapse.
-  4. Sprint feel, stairs up/down, walk-stop feel (unchanged since session 2).
+  1. **When ANYTHING feels pinned/wrong: press "Capture last 7 s"** in the
+     panel (fall recorder — it also auto-captures every knockdown). Then just
+     say so; the capture holds the exact client-side frames.
+  2. Turn feel — **TurnSpeed slider** (default 8, stock was 16) and
+     **AccelLean slider**. Tune live; report the values that feel right.
+  3. Knockdowns — walls are binary now (walk-bump nothing, ≥ brisk jog DOWN);
+     body + hips heap together. Get-up is still an assisted pivot (Phase 3
+     makes it physical); walking locked until ~1.5 s after standing — say if
+     that lockout feels too long.
+  4. **Hover ladder** (leg-supported locomotion direction): drop the
+     **StandForce slider** 10000 → 5000 → 2500 → 0 and walk/stairs at each.
+     Standing at 0 already holds (legs carry the body through the Root
+     socket); we're mapping where walking breaks.
+  5. Sprint feel, stairs up/down, walk-stop feel (unchanged since session 2).
 - **Then the Gate 2 netsim run** (2 players, 150 ms + jitter + 2 % loss):
   observing-client readability of all of the above, **numeric recv KB/s**
   (carried from Gate 1 — note it from the panel), and check whether
@@ -508,6 +513,31 @@ skates — "movement through an invisible core, not driven by the legs";
 3. A brutal double hit (rel 32 then 85+25) needed several retry cycles
    (>8.5 s) but recovered clean — clumsy-but-alive is the accepted Phase 2
    bar; the physical get-up is Phase 3.
+
+**Addendum 2 (same day, user: "still pins", "3rd fix and not fixed — better
+debugging?"):**
+1. **Client-side verification (new instrument class).** All prior verification
+   sampled the SERVER; the user plays the CLIENT. A client-DM sampler during a
+   forced fall settled it: controller property replication is FINE — client
+   StandForce/BMS/BMT track the server within ≤1 sample (~70 ms at client
+   frame rate), pelvis heaps with the capsule (3.8 → 1.6), worst transient
+   marionette moment ≤150 ms. Both sims agree; the remaining user-felt pin is
+   a real designed state my synthetic repros don't hit.
+2. **Prime suspect: the wall stagger band.** 18–22 stud/s wall hits produced a
+   deep stagger (no knockdown): body slumps against the wall, hips held at
+   stand height by design = reads exactly as "pinned into the wall by the
+   hips". WALL now speedMin 17 / speedFallAt 22 → knockdown from ~20 stud/s.
+   Walls are binary: walk-bump nothing, brisk jog+ DOWN.
+3. **Fall recorder (DebugPanel).** Client-side ring buffer (~7 s at frame
+   rate: hrpY, pelvisY, upY, SF, BMS, BMT, MT, Rising, speed) → freezes to the
+   client-side `FallCapture` StringValue 3 s after any tone crash, or via the
+   panel button "Capture last 7 s" when a moment merely feels wrong. Read it
+   with an execute in the **Client** DM. Verified end-to-end (auto-capture of
+   a live knockdown). THE tool for feel-report triage — no more guessing.
+4. **StandForce slider ("SF" attr, 0–20000)** — the hover-ladder experiment
+   lane toward leg-supported locomotion (user direction). setCapsuleReleased
+   restores to the attr, not a constant. Standing at SF=0 full tone already
+   verified; next: walk/stairs at 5000/2500/0.
 
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
