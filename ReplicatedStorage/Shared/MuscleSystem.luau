@@ -49,7 +49,12 @@ local CONFIG = {
 		-- topple the capsule on a wall hit — the Root socket absorbs the body's
 		-- momentum and the wall blocks the tip (verified live at 41 stud/s,
 		-- balance 55: capsule stood like a statue). Readability comes from tone.
-		knockdownFactor = 0.3,
+		-- This is ALSO the stagger floor (updateBalance): a dip that stays above
+		-- it is clamped to it, so balance never collapses on a body that stays
+		-- standing. The near-zero-balance-while-standing middle band read as
+		-- "limbs ragdolled but hips pinned, still walkable" (user feedback) —
+		-- now you either wobble readably or you actually go down.
+		knockdownFactor = 0.45,
 	},
 	-- wall channel: a wall hit stops the CAPSULE, and the body stops with it —
 	-- body-rel speed stays near zero, so the impact reflex above never sees it
@@ -92,6 +97,12 @@ local CONFIG = {
 		riseBoost = 4, riseRamp = 4, riseTimeout = 2.0, retryDown = 0.8,
 	},
 	RISING_ATTR = "Rising",
+	-- capsule feel knobs, live-tunable attributes (user feedback: stock turn speed 16
+	-- reads as pivoting an invisible core — the body never swings through a turn)
+	TURN_ATTR = "TS",
+	LEAN_ATTR = "AL",
+	TURN_SPEED = 8, -- cm.BaseTurnSpeed; stock 16
+	ACCEL_LEAN = 1, -- gc.AccelerationLean; stock 1
 	-- per-joint driver defaults {strength, damping, torque}. Baseline = AJU factory
 	-- values (tuning log 2026-07-14). Root-ward joints get extra damping per the official
 	-- anti-oscillation recipe: they don't "see" downstream chain mass.
@@ -159,7 +170,12 @@ function MuscleSystem.fieldKey(joint: string, field: string): string
 end
 
 function MuscleSystem.isValidAttr(key: string): boolean
-	if key == CONFIG.MASTER_TONE_ATTR or key == CONFIG.BALANCE_ATTR then
+	if
+		key == CONFIG.MASTER_TONE_ATTR
+		or key == CONFIG.BALANCE_ATTR
+		or key == CONFIG.TURN_ATTR
+		or key == CONFIG.LEAN_ATTR
+	then
 		return true
 	end
 	local joint, field = key:match("^M_(%a+)_([sdt])$")
@@ -172,6 +188,12 @@ function MuscleSystem.clampAttr(key: string, value: number): number
 	end
 	if key == CONFIG.BALANCE_ATTR then
 		return math.clamp(value, 0, 20000)
+	end
+	if key == CONFIG.TURN_ATTR then
+		return math.clamp(value, 0, 40)
+	end
+	if key == CONFIG.LEAN_ATTR then
+		return math.clamp(value, 0, 4)
 	end
 	local lim = CONFIG.LIMITS[key:sub(-1)]
 	return math.clamp(value, lim[1], lim[2])
@@ -252,6 +274,12 @@ function MuscleSystem.ensureDefaults(character: Model)
 	if character:GetAttribute(CONFIG.BALANCE_ATTR) == nil then
 		character:SetAttribute(CONFIG.BALANCE_ATTR, CONFIG.BALANCE_TORQUE)
 	end
+	if character:GetAttribute(CONFIG.TURN_ATTR) == nil then
+		character:SetAttribute(CONFIG.TURN_ATTR, CONFIG.TURN_SPEED)
+	end
+	if character:GetAttribute(CONFIG.LEAN_ATTR) == nil then
+		character:SetAttribute(CONFIG.LEAN_ATTR, CONFIG.ACCEL_LEAN)
+	end
 	for _, j in MuscleSystem.JOINTS do
 		local attr = MuscleSystem.jointAttr(j)
 		if character:GetAttribute(attr) == nil then
@@ -262,7 +290,12 @@ end
 
 -- server, inside sim: land one validated+clamped debug write
 function MuscleSystem.applyDebugWrite(character: Model, key: string, value: number)
-	if key == CONFIG.MASTER_TONE_ATTR or key == CONFIG.BALANCE_ATTR then
+	if
+		key == CONFIG.MASTER_TONE_ATTR
+		or key == CONFIG.BALANCE_ATTR
+		or key == CONFIG.TURN_ATTR
+		or key == CONFIG.LEAN_ATTR
+	then
 		character:SetAttribute(key, value)
 		return
 	end
@@ -352,20 +385,31 @@ function MuscleSystem.setupBody(character: Model): boolean
 	return ok
 end
 
--- server, at fall/rise transitions: a limp body's capsule must actually GO DOWN.
+-- server, EVERY sim step: a limp body's capsule must actually GO DOWN.
 -- StandForce=0 kills the hover (the legs no longer hold anything at fall tone) and
 -- BaseMoveSpeed=0 kills walking-while-ragdolled. Verified live: with these released
 -- the whole body heaps INCLUDING the hips (hrpY 4.8 → 1.4); without them the body
 -- dangles from a hovering, walkable capsule (the "standing marionette" bug).
-function MuscleSystem.setCapsuleReleased(character: Model, released: boolean)
+-- moveLock outlives released: the get-up keeps hover (the capsule assists the rise)
+-- but walking mid-rise yanks the half-risen body — locked until fully re-armed.
+-- Enforced per step, not at transitions, so nothing (ability state changes, resets)
+-- can leave a limp body pinned to a live capsule. Writes only on change.
+function MuscleSystem.setCapsuleReleased(character: Model, released: boolean, moveLock: boolean)
 	local cm = character:FindFirstChildOfClass("ControllerManager")
 	local gc = cm and cm:FindFirstChildWhichIsA("GroundController", true)
 	if not cm or not gc then
 		return
 	end
 	pcall(function()
-		(gc :: any).StandForce = if released then 0 else 10000;
-		(cm :: any).BaseMoveSpeed = if released then 0 else 16
+		local g, m = gc :: any, cm :: any
+		local force = if released then 0 else 10000
+		local speed = if released or moveLock then 0 else 16
+		if g.StandForce ~= force then
+			g.StandForce = force
+		end
+		if m.BaseMoveSpeed ~= speed then
+			m.BaseMoveSpeed = speed
+		end
 	end)
 end
 
@@ -409,17 +453,30 @@ function MuscleSystem.updateBalance(character: Model)
 	local powered = character:GetAttribute(CONFIG.POWERED_ATTR) == true
 	local mt = tonumber(character:GetAttribute(CONFIG.MASTER_TONE_ATTR)) or 1
 	local ok, err = pcall(function()
-		local g = gc :: any
+		local g, m = gc :: any, cm :: any
 		g.BalanceRigidityEnabled = false
 		if powered and mt <= CONFIG.COLLAPSE_BALANCE_THRESHOLD then
 			g.BalanceMaxTorque = 0
 		else
-			local factor = if powered then mt * MuscleSystem.impactFactor(character) else 1
+			-- stagger floor: a dip that doesn't knock you DOWN never collapses
+			-- balance — near-zero balance on a standing capsule is the "hips
+			-- pinned, limbs flopping, still walkable" look (user feedback)
+			local dip = math.max(MuscleSystem.impactFactor(character), CONFIG.IMPACT.knockdownFactor)
+			local factor = if powered then mt * dip else 1
 			if character:GetAttribute(CONFIG.RISING_ATTR) == true then
 				factor *= CONFIG.FALL.riseBoost
 			end
 			local base = tonumber(character:GetAttribute(CONFIG.BALANCE_ATTR)) or CONFIG.BALANCE_TORQUE
 			g.BalanceMaxTorque = base * factor
+		end
+		-- capsule feel knobs (live-tunable; write-on-change keeps replication quiet)
+		local turn = tonumber(character:GetAttribute(CONFIG.TURN_ATTR)) or CONFIG.TURN_SPEED
+		if m.BaseTurnSpeed ~= turn then
+			m.BaseTurnSpeed = turn
+		end
+		local lean = tonumber(character:GetAttribute(CONFIG.LEAN_ATTR)) or CONFIG.ACCEL_LEAN
+		if g.AccelerationLean ~= lean then
+			g.AccelerationLean = lean
 		end
 	end)
 	MuscleSystem.lastBalanceError = if ok then nil else tostring(err)

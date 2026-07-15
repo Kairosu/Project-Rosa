@@ -179,7 +179,6 @@ local function simStep(_dt: number)
 				-- limp period over: right the capsule (it fell with the body and
 				-- cannot right itself — see getUpAssist), then one boosted rise
 				MuscleSystem.getUpAssist(character)
-				MuscleSystem.setCapsuleReleased(character, false)
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
 				st.riseTimer = FALL.riseTimeout
 			end
@@ -189,18 +188,20 @@ local function simStep(_dt: number)
 				st.fallArmed = true
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
 			end
-			-- rise watchdog: when the clock runs out, check posture — an upright
-			-- body just needs more time for upHold to clear Rising (a blind retry
-			-- here knocked down SUCCESSFUL stands, verified live); a body still
-			-- on the ground genuinely failed and retries the down-and-right cycle
+			-- rise watchdog. A rise that TOPPLES has failed NOW — waiting out the
+			-- clock leaves a downed body pinned to a fully powered, walkable
+			-- capsule for seconds (the marionette window, caught in telemetry:
+			-- 0.9 s at up=0.00 with StandForce 10000). On expiry, posture decides:
+			-- an upright body just needs more time for upHold to clear Rising (a
+			-- blind retry knocked down SUCCESSFUL stands, verified live); a body
+			-- still down genuinely failed and retries the down-and-right cycle.
 			if character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true then
 				st.riseTimer -= dtStep
-				if st.riseTimer <= 0 then
+				if st.riseTimer <= 0 or upY < FALL.tiltUp then
 					if upY > FALL.riseUp then
 						st.riseTimer = 0.5
 					else
 						character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
-						MuscleSystem.setCapsuleReleased(character, true)
 						st.fallTimer = FALL.retryDown
 					end
 				end
@@ -218,9 +219,6 @@ local function simStep(_dt: number)
 			then
 				st.fallArmed = false
 				st.fallTimer = FALL.downTime
-				-- the hips go down WITH the body (user feedback: limbs ragdolled
-				-- but still standing and walkable = broken)
-				MuscleSystem.setCapsuleReleased(character, true)
 			end
 		end
 		st.mtTarget = if st.fallTimer > 0 then math.min(st.userMt, FALL.tone) else st.userMt
@@ -251,10 +249,10 @@ local function simStep(_dt: number)
 			if offender then
 				warn("[MuscleServer] stability guard: " .. offender .. " — resetting " .. player.Name)
 				character:SetAttribute(MuscleSystem.CONFIG.POWERED_ATTR, false)
-				-- a guard reset mid-fall must not leave the capsule released
+				-- a guard reset mid-fall must not leave the capsule released;
+				-- the per-step enforcement below restores it from this state
 				st.fallTimer = 0
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
-				MuscleSystem.setCapsuleReleased(character, false)
 				for _, part in character:GetChildren() do
 					if part:IsA("BasePart") then
 						part.AssemblyLinearVelocity = Vector3.zero
@@ -265,6 +263,11 @@ local function simStep(_dt: number)
 				st.resetLock = CONFIG.RESET_RELOCK_STEPS
 			end
 		end
+
+		-- enforced every step so no transition or ability stomp can strand a limp
+		-- body on a live capsule; the get-up keeps hover but not walking
+		local rising = character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) == true
+		MuscleSystem.setCapsuleReleased(character, st.fallTimer > 0, st.fallTimer > 0 or rising)
 
 		Locomotion.apply(character, st.sprint)
 		MuscleSystem.step(character)

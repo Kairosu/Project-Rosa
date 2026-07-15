@@ -2,25 +2,28 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
-**As of 2026-07-14, end of Phase 2 session 2:**
+**As of 2026-07-14, end of Phase 2 session 3:**
 - **Phase 0: GATE PASSED. Phase 1: GATE PASSED** (2-client netsim, user-verified).
-- **Phase 2 build COMPLETE, solo-verified.** Sprint (LeftShift, 16→25.5 measured),
-  wall-crash knockdown, live BT balance knob + panel slider, DecelerationTime,
-  void reset, setupBody race fix. Stock Animate module handles walk/run clips
-  under SA (Animation Graph beta not needed — evaluated, skipped).
-- **Session 2 (user feedback pass): falls now take the HIPS down too.** Capsule
-  releases during the limp window (no more ragdolled-but-standing, no more
-  walking-while-down), knockdown is instant (asymmetric tone slew), rise is an
-  assisted capsule pivot + fast tone ramp with a posture-checking watchdog.
-  Two full knockdown cycles verified: heap flat → stable stand in ≈3.5 s.
+- **Phase 2 build COMPLETE.** Sprint, wall-crash knockdown, real falls (hips heap
+  with the body), assisted get-up with watchdog, BT/TS/AL live knobs + sliders.
+- **Session 3 (user feedback pass #2): no more pinned-marionette states.**
+  A rise that topples re-releases IMMEDIATELY (was: up to ~1 s downed on a fully
+  powered, walkable capsule — the "pinned by the hips" report); balance dips
+  floor at the knockdown threshold (was: near-zero balance on a standing capsule
+  = "limbs ragdolled, hips pinned, still walkable"); knockdown band widened
+  (knockdownFactor 0.3→0.45 — you either wobble readably or you GO DOWN);
+  capsule release now enforced every step; walking locked during the get-up;
+  turn speed halved (BaseTurnSpeed 16→8) for the ice-skate pivot feel.
 - **User playtest items for Gate 2** (feel checks, minutes of play):
-  1. Get knocked down (sprint into the SprintWall / crate shove) — whole body
-     including hips should heap, ~1.6 s down, scramble back up. The get-up is an
-     assisted pivot until Phase 3 — functional, not beautiful, expect a bounce.
-  2. Confirm you can NOT walk while down.
-  3. Sprint feel (hold LeftShift) — speed + anim look.
-  4. Walk up/down the stairs — watch for jitter.
-  5. Walk-stop feel (DecelerationTime 0→0.2 is new since the last feel pass).
+  1. Turn feel — new **TurnSpeed slider** (default 8, stock was 16) and
+     **AccelLean slider** in the panel. Tune live until turning stops feeling
+     like pivoting an invisible core; report the values that feel right.
+  2. Knockdowns (wall sprint / crate shove) — body + hips heap together, no
+     lingering ragdolled-but-standing or walkable-while-limp states. Get-up is
+     still an assisted pivot (Phase 3 makes it physical); you cannot walk until
+     fully back up (~1.5 s after standing) — say if that lockout feels too long.
+  3. Moderate hits/bumps now read as a firm wobble, not a floppy collapse.
+  4. Sprint feel, stairs up/down, walk-stop feel (unchanged since session 2).
 - **Then the Gate 2 netsim run** (2 players, 150 ms + jitter + 2 % loss):
   observing-client readability of all of the above, **numeric recv KB/s**
   (carried from Gate 1 — note it from the panel), and check whether
@@ -88,12 +91,16 @@ much as knowing that `0.6` works.
 
 | Property | Value | Notes |
 |---|---|---|
-| BalanceMaxTorque | BT attr (default 800) × tone × impactFactor (× riseBoost 4 while Rising) | BT is live-tunable (panel slider, remote-validated 0–20000). Ladder: impulse 250 → min up 0.91 @ 800 / 0.82 @ 250 / 0.81 @ 100 (saturates — socket decouples) |
+| BalanceMaxTorque | BT attr (default 800) × tone × max(impactFactor, 0.45) (× riseBoost 4 while Rising) | BT is live-tunable (panel slider, remote-validated 0–20000). The 0.45 stagger floor (= knockdownFactor) keeps a standing body from reading as ragdolled (session 3). Ladder: impulse 250 → min up 0.91 @ 800 / 0.82 @ 250 / 0.81 @ 100 (saturates — socket decouples) |
 | BalanceSpeed | 100 (stock) | untouched so far |
 | BalanceRigidityEnabled | `false` | non-negotiable — CONFIRMED live: rigid balance + powered body = perpetual flail (hard reaction impulses through the Root socket) |
 | AccelerationTime | 0.2 | stop/launch whip fix (session 3) |
 | DecelerationTime | 0.2 | symmetric smoothing (Phase 2); also keeps normal stops under the wall channel's 400 stud/s² |
 | Sprint | Running.SpeedMultiplier = 1.6 → 25.5 stud/s | server-only writer; ability applies it via MoveSpeedFactor |
+| BaseTurnSpeed | TS attr (default 8; stock 16) | live-tunable (panel slider, 0–40) — stock 16 is an instant pivot, the "ice skate" turn feel (session 3) |
+| AccelerationLean | AL attr (default 1 = stock) | live-tunable (panel slider, 0–4) — lean into accel/decel, feel knob |
+| StandForce / BaseMoveSpeed | 10000 / 16; **released per step** while fallTimer > 0 (both → 0); BaseMoveSpeed also 0 while Rising (move lock) | enforcement is per-step write-on-change, not transition-time (session 3) |
+| GroundOffset | 2.925 (stock, observed live) | earlier log rows saying 1 were wrong |
 
 ## MUSCLE MODIFIERS
 
@@ -434,6 +441,57 @@ hrpY 0.4 → stable stand ≈3.5 s later, repeatable).
 **Verdict:** kept — awaiting user feel pass (knockdown → heap → scramble-up;
 the get-up is an assisted pivot until Phase 3, expect it to read as functional,
 not beautiful)
+**Observing-client check:** NOT RUN — Gate 2 items
+
+---
+
+## 2026-07-14 — Phase 2 (session 3) — killing the pinned-marionette states
+
+**User feedback driving this session:** (a) walking/turning feels like ice
+skates — "movement through an invisible core, not driven by the legs";
+(b) wall knockdowns leave the body "pinned into the wall by the hips";
+(c) walking knockdowns sometimes leave limbs limp but hips upright and walkable.
+
+**Diagnosis (server telemetry, 50–120 ms sampling through forced fall cycles):**
+1. **The marionette window.** The fall trigger is disarmed while `Rising`, so a
+   rise that TOPPLED lay on the ground with the capsule at FULL power —
+   StandForce 10000, BaseMoveSpeed 16, walkable — until the watchdog expired.
+   Measured: 0.9 s at up=0.00 fully powered. Against a wall this is exactly
+   "pinned by the hips". Ability-stomp theory CLEARED: `FallingDown` goes
+   Active during our falls but touches none of our properties.
+2. **The mid-band dip.** An impact factor between knockdownFactor and 1 zeroed
+   `BalanceMaxTorque`-ish on a body that STAYS standing: root orientation goes
+   free, limbs flop, capsule keeps height and accepts WASD. A jog-speed wall
+   hit (19–24 stud/s, below the sprint knockdown band) lands exactly here.
+3. **Turn speed.** Stock `ControllerManager.BaseTurnSpeed = 16` ≈ instant pivot
+   about the capsule axis — the "invisible core" turning feel.
+   (Also corrected: live `GroundOffset` reads **2.925**, not the 1 recorded
+   earlier.)
+
+**Fixes (all verified live this session):**
+1. **Rise fast-fail**: while `Rising`, `upY < tiltUp` retries the down-and-right
+   cycle IMMEDIATELY instead of waiting out the watchdog. Verified: failed rise
+   re-released within one 100 ms sample (was 0.9 s+).
+2. **Stagger floor = knockdownFactor, raised 0.3 → 0.45**: `updateBalance`
+   clamps the applied dip to ≥ 0.45, so balance never collapses on a standing
+   body; a RAW factor below 0.45 is now a real knockdown (fall reflex, capsule
+   release). Binary outcome: readable wobble or actually down. Verified:
+   moderate hit (rel ≈ 29) → BMT 800→691 wobble, no fall; hard hit → down at
+   0.37 s, walkable stand at 4.57 s.
+3. **Per-step release enforcement**: `setCapsuleReleased(char, released,
+   moveLock)` runs EVERY server step (write-on-change), not at transitions —
+   no state path can strand a limp body on a live capsule.
+4. **Move lock through the get-up**: `BaseMoveSpeed = 0` while `fallTimer > 0`
+   OR `Rising` — walking mid-rise yanked the half-risen body over, and the
+   get-up should read as committed. Restores when upright re-arms (~1.5 s
+   after standing). Walk verified clean after: max 17.2 stud/s, up 1.00.
+5. **TS / AL live knobs** (attrs + panel sliders, clamps 0–40 / 0–4):
+   `BaseTurnSpeed` default **8** (stock 16) — the ice-skate lever;
+   `AccelerationLean` default 1 (stock). Applied in `updateBalance`
+   write-on-change, both peers, deterministic.
+
+**Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
+the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items
 
 ---

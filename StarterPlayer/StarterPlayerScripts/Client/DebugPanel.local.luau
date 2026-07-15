@@ -31,6 +31,8 @@ end)
 local jointStates: { [string]: { [string]: any } } = {}
 local masterState = Iris.State(1)
 local balanceState = Iris.State(MuscleSystem.CONFIG.BALANCE_TORQUE)
+local turnState = Iris.State(MuscleSystem.CONFIG.TURN_SPEED)
+local leanState = Iris.State(MuscleSystem.CONFIG.ACCEL_LEAN)
 local lastPowered = false
 
 local function attrOr(char: Model, attr: string, fallback: number): number
@@ -56,6 +58,8 @@ local function reread(char: Model?)
 	if char then
 		masterState:set(attrOr(char, MuscleSystem.CONFIG.MASTER_TONE_ATTR, 1))
 		balanceState:set(attrOr(char, MuscleSystem.CONFIG.BALANCE_ATTR, MuscleSystem.CONFIG.BALANCE_TORQUE))
+		turnState:set(attrOr(char, MuscleSystem.CONFIG.TURN_ATTR, MuscleSystem.CONFIG.TURN_SPEED))
+		leanState:set(attrOr(char, MuscleSystem.CONFIG.LEAN_ATTR, MuscleSystem.CONFIG.ACCEL_LEAN))
 	end
 end
 
@@ -121,6 +125,16 @@ Iris:Connect(function()
 	local balance = Iris.SliderNum({ "BalanceTorque", 10, 0, 5000 }, { number = balanceState })
 	if balance.numberChanged() then
 		remote:FireServer(MuscleSystem.CONFIG.BALANCE_ATTR, balanceState:get())
+	end
+
+	-- feel knobs: how fast the capsule pivots, how far the body leans into accel
+	local turn = Iris.SliderNum({ "TurnSpeed", 0.5, 0, 40 }, { number = turnState })
+	if turn.numberChanged() then
+		remote:FireServer(MuscleSystem.CONFIG.TURN_ATTR, turnState:get())
+	end
+	local lean = Iris.SliderNum({ "AccelLean", 0.05, 0, 4 }, { number = leanState })
+	if lean.numberChanged() then
+		remote:FireServer(MuscleSystem.CONFIG.LEAN_ATTR, leanState:get())
 	end
 
 	if Iris.Button({ "Re-read values" }).clicked() then
