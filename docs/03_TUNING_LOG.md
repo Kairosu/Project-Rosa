@@ -490,6 +490,25 @@ skates — "movement through an invisible core, not driven by the legs";
    `AccelerationLean` default 1 (stock). Applied in `updateBalance`
    write-on-change, both peers, deterministic.
 
+**Addendum (same day, user: "still pins briefly when going ragdoll"):**
+1. **Dip escalation.** A hit RAMPS across frames: the first threshold crossing
+   locked the window at that frame's MILD severity and the true peak (2–3
+   frames later) was swallowed by one-dip-per-window — so real knockdowns
+   registered as wobbles and the fall waited for the slow tilt trigger. Now a
+   deeper factor escalates an ACTIVE window in place (never during the re-arm
+   tail — that would re-open the boundary-struggle loop; timer NOT refreshed —
+   escalation can't self-chain off the flop). Verified: mild hit (rel 32) +
+   deep hit 0.15 s later inside the window → knockdown 80 ms after the peak
+   (previously swallowed entirely, no fall).
+2. **tiltUp 0.55 → 0.65.** At 0.55 the tilt trigger waited until ~56° — the
+   body read as fully going over while the capsule stayed pinned. Successful
+   rises hold upY ≥ 0.94, so 0.65 does not false-fail them. Reference tilt
+   cycle after both changes: fell 0.35 s, walkable stand 4.75 s, 1 retry —
+   recovery unchanged.
+3. A brutal double hit (rel 32 then 85+25) needed several retry cycles
+   (>8.5 s) but recovered clean — clumsy-but-alive is the accepted Phase 2
+   bar; the physical get-up is Phase 3.
+
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items

@@ -91,7 +91,11 @@ local CONFIG = {
 	-- riseTimeout/retryDown: a failed rise must retry the whole down-and-right
 	-- cycle, or a bad landing deadlocks lying at full tone (verified).
 	FALL = {
-		tiltUp = 0.55, tone = 0.08, downTime = 1.6, riseUp = 0.85, riseHold = 1.5,
+		-- tiltUp 0.65: at 0.55 the trigger waited until ~56° — the body read as
+		-- fully going over while the capsule stayed pinned (user: "still pins
+		-- briefly"). Successful rises hold upY ≥ 0.94 (telemetry), so 0.65 does
+		-- not false-fail them.
+		tiltUp = 0.65, tone = 0.08, downTime = 1.6, riseUp = 0.85, riseHold = 1.5,
 		-- riseRamp 4: at 6 the legs snap to full power while the feet catch the
 		-- ground and the rise becomes an 8-stud hop (verified live)
 		riseBoost = 4, riseRamp = 4, riseTimeout = 2.0, retryDown = 0.8,
@@ -565,10 +569,6 @@ function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 		return
 	end
 
-	if st then
-		return -- active or re-arming: one dip per window, never a chain
-	end
-
 	-- body-rel channel: external hits, deaf during self-motion transients
 	local omegaY = math.abs(hrp.AssemblyAngularVelocity.Y)
 	local deaf = turnDeaf[character] or 0
@@ -581,7 +581,19 @@ function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 		and math.abs(hSpeed - slow) < imp.selfSpeedDelta
 	then
 		local factor = math.clamp(1 - (peakRel - imp.threshold) / (imp.fallAt - imp.threshold), 0, 1)
-		impactState[character] = { factor = factor, timer = imp.staggerTime + imp.rearm }
+		if not st then
+			impactState[character] = { factor = factor, timer = imp.staggerTime + imp.rearm }
+		elseif st.timer > imp.rearm and factor < st.factor then
+			-- a hit RAMPS across frames: the first threshold crossing locks a
+			-- mild dip and the true peak lands INSIDE the window, swallowed —
+			-- so knockdowns waited for the slow tilt trigger instead (the
+			-- "brief pin at ragdoll onset", user-reported). A deeper factor
+			-- escalates an ACTIVE window in place; never during the re-arm
+			-- tail (that re-opens the boundary-struggle loop re-arm kills),
+			-- and the timer is not refreshed (escalation stays bounded to the
+			-- original stagger window, so it cannot self-chain off the flop).
+			st.factor = factor
+		end
 	end
 end
 
