@@ -907,3 +907,24 @@ rounds landed face-down every time, GF=false; face-up path is code-shared but
 unwatched); rise reliability unchanged (2–3 attempts typical); the arms may
 read "reachy" instead of "pushy" (Position IK doesn't know about pressing —
 tune HAND_BACK/HANDS_OFF first); netsim numbers at 150 ms still unknown.
+
+**Addendum 9 · v2 choreography (same night, user eyes-test verdict on v1):**
+"back bridge" face-up, "downward dog, driving with its head" face-down,
+1+ retries, spasm-ish final catch. All three are v1 plant geometry, not IK
+failure: feet planted AHEAD of a rising pelvis have exactly one kinematic
+solution (bridge); hands beside the HIPS of a prone body push the hips up
+first (downward dog). v2:
+- Plant axes now keyed off the lying body's HEAD-WARD direction = pelvis UP
+  projected flat (the spine line). The look vector points into/out of the
+  ground on a lying body and lies about facing — that was half of v1's sin.
+- FACE-UP: hands ±0.8 beside / 0.10 butt-ward of the hips; feet TUCKED
+  0.30 butt-ward at ±0.35 — rise over tucked feet = sit-up → squat.
+  Hands off at 65 %.
+- FACE-DOWN: hands ±0.5 at 0.95 HEAD-ward (under the shoulders — press-up);
+  feet start 0.45 behind, knees drag under to 0.15 across 20–60 % of the
+  clip. Hands off at 85 % (the press carries longer).
+- Both: foot offsets ease to directly under the pelvis across 65–95 %.
+- CLIP_TIME 1.6 → 2.0 (phases were crowded); riseTimeout 2.2 → 2.6 keeps the
+  0.6 s post-clip grace.
+Untested by instrument (user was already in a play session) — user verdict
+pending on: bridge gone? press-up reads? retry count down?

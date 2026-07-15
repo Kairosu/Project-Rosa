@@ -19,7 +19,9 @@
 -- height from it; PoseDriver schedules IK plant weights from it.
 
 local CONFIG = {
-	CLIP_TIME = 1.6, -- total rise length; everything schedules against this
+	-- total rise length; everything schedules against this. 1.6 crowded the
+	-- IK phases (bridge/downward-dog reads + retries — user report, Add. 9 v2)
+	CLIP_TIME = 2.0,
 	TIME_ATTR = "GT",
 	FACE_ATTR = "GF",
 }

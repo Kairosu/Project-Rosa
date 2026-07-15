@@ -37,17 +37,35 @@ local CONFIG = {
 	FLAIL_SIDE = 1.9, -- resting flail target distance out from the pelvis
 	FLAIL_UP = 1.8,
 	FLAIL_SMOOTH = 0.06,
-	-- getup IK choreography (pelvis-relative, ground-anchored)
+	-- getup IK choreography (ground-anchored, keyed off the lying body's
+	-- HEAD-WARD axis — the pelvis UP vector projected flat; the look vector
+	-- points into/out of the ground on a lying body and lies about facing)
 	GETUP_WEIGHT_RATE = 6, -- weight ramp per second into/out of the plant
-	GETUP_HAND_SIDE = 0.85, -- hands plant this far out from the pelvis
-	GETUP_HAND_BACK = 0.25, -- ... and slightly behind it (the push-off line)
-	GETUP_FOOT_SIDE = 0.35, -- feet plant at stance width
-	GETUP_FOOT_FWD = 0.55, -- ... ahead of the pelvis (knees-bent plant)
 	GETUP_LIFT = 0.12, -- target height above the ground hit
-	GETUP_HANDS_OFF = 0.75, -- hands release at this clip progress (arms ease off)
-	GETUP_FEET_OFF = 0.97, -- feet release right at the stand
 	GETUP_SMOOTH = 0.1,
 	GETUP_RAY = 6,
+	-- FACE-UP (sit-up → squat): hands just behind the hips, feet TUCKED
+	-- under the body — v1 planted the feet AHEAD, and pelvis-rise over
+	-- forward feet has exactly one solution: a back bridge (user report)
+	UP_HAND_SIDE = 0.8,
+	UP_HAND_HEAD = -0.10, -- barely butt-ward of the hips
+	UP_FOOT_SIDE = 0.35,
+	UP_FOOT_HEAD = -0.30, -- tucked toward the butt
+	UP_HANDS_OFF = 0.65, -- hands release as the weight comes over the feet
+	-- FACE-DOWN (press-up → kneel → squat): hands plant HEAD-WARD under the
+	-- shoulders (v1 put them beside the hips → hips rose first: downward
+	-- dog, "driving with its head"), knees drag under as the clip advances
+	DOWN_HAND_SIDE = 0.5,
+	DOWN_HAND_HEAD = 0.95,
+	DOWN_FOOT_SIDE = 0.35,
+	DOWN_FOOT_HEAD_FROM = -0.45, -- start: legs trail behind
+	DOWN_FOOT_HEAD_TO = -0.15, -- knees dragged under by mid-clip
+	DOWN_HANDS_OFF = 0.85, -- the press carries longer than the sit-up push
+	-- both: feet migrate to directly under the pelvis late in the rise, and
+	-- release only at the stand
+	FEET_UNDER_START = 0.65,
+	FEET_UNDER_END = 0.95,
+	GETUP_FEET_OFF = 0.97,
 }
 
 local PoseDriver = {}
@@ -192,13 +210,15 @@ function PoseDriver.step(character: Model, dt: number)
 
 	-- GETUP: plant targets on the ground around the pelvis; weights scheduled
 	-- from the replicated GT clock. Same computation on every peer.
-	local wantGetup = 0
+	local faceUp = character:GetAttribute(GetupPose.CONFIG.FACE_ATTR) ~= false
 	local handsWant, feetWant = 0, 0
+	local clipP = 0
 	if fs == "getup" and ensureGetupIK(character, r) then
 		local t = tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0
-		local p = GetupPose.progress(t)
-		handsWant = if p < CONFIG.GETUP_HANDS_OFF then 1 else 0
-		feetWant = if p < CONFIG.GETUP_FEET_OFF then 1 else 0
+		clipP = GetupPose.progress(t)
+		local handsOff = if faceUp then CONFIG.UP_HANDS_OFF else CONFIG.DOWN_HANDS_OFF
+		handsWant = if clipP < handsOff then 1 else 0
+		feetWant = if clipP < CONFIG.GETUP_FEET_OFF then 1 else 0
 	end
 	if r.gIK and r.gAtt then
 		-- weight slews (never snaps); one rate for in and out
@@ -230,29 +250,35 @@ function PoseDriver.step(character: Model, dt: number)
 			end
 			local hit = Workspace:Raycast(pelvis.Position, Vector3.new(0, -CONFIG.GETUP_RAY, 0), r.params)
 			local groundY = if hit then hit.Position.Y else pelvis.Position.Y - 2.7
-			-- body-relative horizontal frame (degenerate look → use right×Y)
-			local look = pelvis.CFrame.LookVector
-			local fwd = Vector3.new(look.X, 0, look.Z)
-			if fwd.Magnitude < 0.15 then
-				local rgt = pelvis.CFrame.RightVector
-				fwd = Vector3.new(rgt.Z, 0, -rgt.X) -- right rotated -90° about Y
+			-- HEAD-WARD axis of a lying body: pelvis UP projected flat (the
+			-- spine direction); look-vector fallback for near-upright frames
+			local upv = pelvis.CFrame.UpVector
+			local headDir = Vector3.new(upv.X, 0, upv.Z)
+			if headDir.Magnitude < 0.15 then
+				local look = pelvis.CFrame.LookVector
+				headDir = Vector3.new(look.X, 0, look.Z)
 			end
-			if fwd.Magnitude > 0.001 then
-				fwd = fwd.Unit
-			else
-				fwd = Vector3.zAxis
+			headDir = if headDir.Magnitude > 0.001 then headDir.Unit else Vector3.zAxis
+			local right = Vector3.new(headDir.Z, 0, -headDir.X)
+			local function ease(from: number, to: number): number
+				local x = math.clamp((clipP - from) / math.max(to - from, 1e-3), 0, 1)
+				return x * x * (3 - 2 * x)
 			end
-			-- face-down bodies push the other way: hands forward, feet drag back
-			local faceUp = character:GetAttribute(GetupPose.CONFIG.FACE_ATTR) ~= false
-			local handFwd = if faceUp then -CONFIG.GETUP_HAND_BACK else CONFIG.GETUP_HAND_BACK
-			local footFwd = if faceUp then CONFIG.GETUP_FOOT_FWD else CONFIG.GETUP_FOOT_FWD * 0.4
-			local right = Vector3.new(fwd.Z, 0, -fwd.X) -- fwd rotated; horizontal right
+			local handSide = if faceUp then CONFIG.UP_HAND_SIDE else CONFIG.DOWN_HAND_SIDE
+			local handHead = if faceUp then CONFIG.UP_HAND_HEAD else CONFIG.DOWN_HAND_HEAD
+			local footSide = if faceUp then CONFIG.UP_FOOT_SIDE else CONFIG.DOWN_FOOT_SIDE
+			local footHead = if faceUp
+				then CONFIG.UP_FOOT_HEAD
+				else CONFIG.DOWN_FOOT_HEAD_FROM + (CONFIG.DOWN_FOOT_HEAD_TO - CONFIG.DOWN_FOOT_HEAD_FROM) * ease(0.2, 0.6)
+			-- late rise: feet migrate to directly under the pelvis (a tucked
+			-- offset at stand time reads as leaning over your own toes)
+			footHead *= 1 - ease(CONFIG.FEET_UNDER_START, CONFIG.FEET_UNDER_END)
 			local base = Vector3.new(pelvis.Position.X, groundY + CONFIG.GETUP_LIFT, pelvis.Position.Z)
 			local ga = r.gAtt :: { Attachment }
-			ga[1].WorldPosition = base - right * CONFIG.GETUP_HAND_SIDE + fwd * handFwd
-			ga[2].WorldPosition = base + right * CONFIG.GETUP_HAND_SIDE + fwd * handFwd
-			ga[3].WorldPosition = base - right * CONFIG.GETUP_FOOT_SIDE + fwd * footFwd
-			ga[4].WorldPosition = base + right * CONFIG.GETUP_FOOT_SIDE + fwd * footFwd
+			ga[1].WorldPosition = base - right * handSide + headDir * handHead
+			ga[2].WorldPosition = base + right * handSide + headDir * handHead
+			ga[3].WorldPosition = base - right * footSide + headDir * footHead
+			ga[4].WorldPosition = base + right * footSide + headDir * footHead
 		end
 	end
 

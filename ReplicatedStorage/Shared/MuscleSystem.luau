@@ -127,7 +127,9 @@ local CONFIG = {
 		-- ceilings and full-tone rises needed 3 attempts (verified). At 3 the
 		-- muscles are full by 0.33 s and the clip does the rest. riseTimeout
 		-- must stay longer than GetupPose.CONFIG.CLIP_TIME.
-		riseBoost = 4, riseRamp = 3, riseTimeout = 2.2, retryDown = 0.8,
+		-- riseTimeout tracks CLIP_TIME (2.0 since the IK v2 pass): 0.6 s of
+		-- post-clip grace before posture judges the attempt
+		riseBoost = 4, riseRamp = 3, riseTimeout = 2.6, retryDown = 0.8,
 		-- committed-topple trigger: tilted past tipUp AND tipping faster than
 		-- tipRate (rad/s, horizontal axes) = it is going over NOW. Both gates
 		-- together cannot false-fire on AccelerationLean or normal wobble.
