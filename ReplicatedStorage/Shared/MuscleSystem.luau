@@ -29,6 +29,18 @@ local CONFIG = {
 	-- (stagger + rearm) — without it, crossing back over the upright gate while still
 	-- moving fast re-triggers the dip and the body struggles at the boundary forever.
 	IMPACT = { threshold = 25, fallAt = 55, staggerTime = 0.6, uprightGate = 0.7, rearm = 2.0 },
+	-- the capsule brakes instantly by default (AccelerationTime 0); the heavy body
+	-- keeps its momentum and whips forward-then-back on every stop (user feedback).
+	-- A little capsule smoothing removes most of the whip.
+	ACCEL_TIME = 0.2,
+	-- fall reflex (Phase 3 seed): a body that is going down goes LIMP — tone slews
+	-- toward `tone` while tilted past `tiltUp`, held for `downTime`, then restores
+	-- (which is also what lifts him back up). This is what makes falls ragdoll.
+	-- riseBoost: balance is multiplied while getting up (set via the "Rising"
+	-- attribute) — without it the rise half-completes, topples, re-limps, forever.
+	-- riseHold: must stay upright this long before the fall trigger re-arms.
+	FALL = { tiltUp = 0.55, tone = 0.15, downTime = 1.6, riseUp = 0.85, riseHold = 0.5, riseBoost = 4 },
+	RISING_ATTR = "Rising",
 	-- per-joint driver defaults {strength, damping, torque}. Baseline = AJU factory
 	-- values (tuning log 2026-07-14). Root-ward joints get extra damping per the official
 	-- anti-oscillation recipe: they don't "see" downstream chain mass.
@@ -36,12 +48,14 @@ local CONFIG = {
 		Root = { 1.0, 1.25, 3000 },
 		Waist = { 1.0, 1.25, 3000 },
 		Neck = { 1.0, 1.0, 3000 },
-		LeftShoulder = { 1.0, 1.0, 3000 },
-		LeftElbow = { 1.0, 1.0, 3000 },
-		LeftWrist = { 1.0, 1.0, 3000 },
-		RightShoulder = { 1.0, 1.0, 3000 },
-		RightElbow = { 1.0, 1.0, 3000 },
-		RightWrist = { 1.0, 1.0, 3000 },
+		-- arms carry no load, so they can afford to be loose: lower strength gives
+		-- them natural lag and swing instead of rigid pose-tracking (user feedback)
+		LeftShoulder = { 0.65, 1.0, 3000 },
+		LeftElbow = { 0.65, 1.0, 3000 },
+		LeftWrist = { 0.5, 1.0, 3000 },
+		RightShoulder = { 0.65, 1.0, 3000 },
+		RightElbow = { 0.65, 1.0, 3000 },
+		RightWrist = { 0.5, 1.0, 3000 },
 		LeftHip = { 1.0, 1.25, 3000 },
 		LeftKnee = { 1.0, 1.0, 3000 },
 		LeftAnkle = { 1.0, 1.0, 3000 },
@@ -267,6 +281,13 @@ function MuscleSystem.setupBody(character: Model): boolean
 			end
 		end
 	end
+	local cm = character:FindFirstChildOfClass("ControllerManager")
+	local gc = cm and cm:FindFirstChildWhichIsA("GroundController", true)
+	if gc then
+		pcall(function()
+			(gc :: any).AccelerationTime = CONFIG.ACCEL_TIME
+		end)
+	end
 	return true
 end
 
@@ -290,6 +311,9 @@ function MuscleSystem.updateBalance(character: Model)
 			g.BalanceMaxTorque = 0
 		else
 			local factor = if powered then mt * MuscleSystem.impactFactor(character) else 1
+			if character:GetAttribute(CONFIG.RISING_ATTR) == true then
+				factor *= CONFIG.FALL.riseBoost
+			end
 			g.BalanceMaxTorque = CONFIG.BALANCE_TORQUE * factor
 		end
 	end)

@@ -220,3 +220,29 @@ stale-file session produced 30 minutes of false diagnosis).
 **Observing-client check:** NOT RUN — items 5–6 need the 2-client netsim session
 
 ---
+
+## 2026-07-14 — Phase 1 (session 3) — feel pass: ragdoll falls, soft arms, stop-whip
+
+**User feedback driving this session:** falls too rigid; arms too stiff; forward-then-back
+lean when stopping a walk.
+
+**Fall reflex (Phase 3 seed, in MuscleServer + CONFIG.FALL):** tilt below up=0.55 →
+master tone slews to 0.15 (limp DURING the fall — this is what makes falls ragdoll) →
+1.6 s down → `Rising` attribute set → balance ×4 while rising → one committed rise →
+re-arm only after 0.5 s continuously upright. Full cycle measured: hit → limp fall →
+heap → single clean rise → stable stand in ~3.5 s, zero guard trips.
+Two failure modes tuned out, in order:
+- re-trigger while lying (re-arm gated on having STOOD, not on time),
+- rise half-completes → topples → re-limps forever (fixed by riseBoost=4 + riseHold).
+
+**Arms softened** (they bear no load): shoulders/elbows 1.0 → **0.65** strength,
+wrists → **0.5**, damping 1.0 unchanged. Stand unaffected (max |v| 6.3 incl. arm swing).
+
+**Stop-whip:** `GroundController.AccelerationTime` 0 → **0.2** (set in setupBody).
+The instant capsule brake was whipping the 18.5-mass body forward-then-back on every
+stop. Feel verdict pending user playtest.
+
+**Verdict:** kept pending user feel-check
+**Observing-client check:** NOT RUN — still the open Gate 1 item
+
+---

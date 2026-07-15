@@ -38,6 +38,10 @@ type CharState = {
 	resetLock: number,
 	spawnCFrame: CFrame,
 	mtTarget: number,
+	userMt: number, -- what the player/panel asked for; falls override it temporarily
+	fallTimer: number, -- > 0 while limp from a fall
+	fallArmed: boolean, -- re-arms only after standing again, else lying re-triggers forever
+	upHold: number, -- continuous seconds spent upright
 	setupDone: boolean,
 }
 local charStates: { [Player]: CharState } = {}
@@ -63,6 +67,10 @@ local function onCharacter(player: Player, character: Model)
 		resetLock = 0,
 		spawnCFrame = character:GetPivot(),
 		mtTarget = 1,
+		userMt = 1,
+		fallTimer = 0,
+		fallArmed = true,
+		upHold = 0,
 		setupDone = false,
 	}
 end
@@ -90,7 +98,7 @@ local function simStep(_dt: number)
 		local st = charStates[w.player]
 		if st and st.character.Parent then
 			if w.key == MuscleSystem.CONFIG.MASTER_TONE_ATTR then
-				st.mtTarget = w.value -- slewed below, never stepped
+				st.userMt = w.value -- slewed below, never stepped
 			else
 				MuscleSystem.applyDebugWrite(st.character, w.key, w.value)
 			end
@@ -145,6 +153,38 @@ local function simStep(_dt: number)
 				end
 			end
 		end
+
+		-- fall reflex: a body that is going down goes LIMP (this is the ragdoll fall);
+		-- tone restores after downTime, and restoring tone is also what lifts him back
+		local FALL = MuscleSystem.CONFIG.FALL
+		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local upY = if hrp then hrp.CFrame.UpVector.Y else 1
+		local dtStep = if type(_dt) == "number" then _dt else 1 / 60
+		if st.fallTimer > 0 then
+			st.fallTimer -= dtStep
+			st.upHold = 0
+			if st.fallTimer <= 0 then
+				-- limp period over: one boosted, committed rise
+				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
+			end
+		else
+			st.upHold = if upY > FALL.riseUp then st.upHold + dtStep else 0
+			if st.upHold >= FALL.riseHold and not st.fallArmed then
+				st.fallArmed = true
+				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
+			end
+			if
+				st.fallArmed
+				and upY < FALL.tiltUp
+				and st.settle == 0
+				and st.resetLock == 0
+				and character:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true
+			then
+				st.fallArmed = false
+				st.fallTimer = FALL.downTime
+			end
+		end
+		st.mtTarget = if st.fallTimer > 0 then math.min(st.userMt, FALL.tone) else st.userMt
 
 		-- master tone slews toward its target every step
 		local mtNow = tonumber(character:GetAttribute(MuscleSystem.CONFIG.MASTER_TONE_ATTR)) or 1
