@@ -2,41 +2,38 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
-**As of 2026-07-14, end of Phase 2 session 3:**
-- **Phase 0: GATE PASSED. Phase 1: GATE PASSED** (2-client netsim, user-verified).
-- **Phase 2 build COMPLETE.** Sprint, wall-crash knockdown, real falls (hips heap
-  with the body), assisted get-up with watchdog, BT/TS/AL live knobs + sliders.
-- **Session 3 (user feedback pass #2): no more pinned-marionette states.**
-  A rise that topples re-releases IMMEDIATELY (was: up to ~1 s downed on a fully
-  powered, walkable capsule — the "pinned by the hips" report); balance dips
-  floor at the knockdown threshold (was: near-zero balance on a standing capsule
-  = "limbs ragdolled, hips pinned, still walkable"); knockdown band widened
-  (knockdownFactor 0.3→0.45 — you either wobble readably or you GO DOWN);
-  capsule release now enforced every step; walking locked during the get-up;
-  turn speed halved (BaseTurnSpeed 16→8) for the ice-skate pivot feel.
-- **User playtest items for Gate 2** (feel checks, minutes of play):
-  1. **When ANYTHING feels pinned/wrong: press "Capture last 7 s"** in the
-     panel (fall recorder — it also auto-captures every knockdown). Then just
-     say so; the capture holds the exact client-side frames.
-  2. Turn feel — **TurnSpeed slider** (default 8, stock was 16) and
-     **AccelLean slider**. Tune live; report the values that feel right.
-  3. Knockdowns — walls are binary now (walk-bump nothing, ≥ brisk jog DOWN);
-     body + hips heap together. Get-up is still an assisted pivot (Phase 3
-     makes it physical); walking locked until ~1.5 s after standing — say if
-     that lockout feels too long.
-  4. **Hover ladder** (leg-supported locomotion direction): drop the
-     **StandForce slider** 10000 → 5000 → 2500 → 0 and walk/stairs at each.
-     Standing at 0 already holds (legs carry the body through the Root
-     socket); we're mapping where walking breaks.
-  5. Sprint feel, stairs up/down, walk-stop feel (unchanged since session 2).
-- **Then the Gate 2 netsim run** (2 players, 150 ms + jitter + 2 % loss):
-  observing-client readability of all of the above, **numeric recv KB/s**
-  (carried from Gate 1 — note it from the panel), and check whether
-  `list_roblox_studios` sees test-server/client instances (04_PREFLIGHT §2).
+**As of 2026-07-15: Phase 0, 1, and 2 GATES PASSED. ARCHITECTURE PIVOTED.**
+- **GATE 2 PASSED** (user-run: full feel pass + 2-client netsim, "testing
+  complete no issues"). Walks/runs clean, wall crash fells, trips fell
+  (contact-gated), whole body heaps including hips, recovers repeatably.
+- **⚡ THE PIVOT: locomotion is now PELVIS-DRIVEN** (`Shared/PelvisDrive.luau`,
+  **default ON at spawn**; panel "locomotion A/B" toggles back to the legacy
+  CCL capsule). Decided by A/B verdict ("feels way better, less like it's
+  fighting itself, doesn't pin on walls") + netsim. Deciding fact: the CCL
+  capsule is orientation-LOCKED under balance (servo, not spring) and its
+  collidable HRP box caused the entire "pinned hips" bug family. CCL remains
+  as input conduit (MovingDirection, Running.SpeedMultiplier). Details:
+  00_ENGINE_FACTS § 2 pivot block + Addenda 5–7 below.
+- **Current pelvis gains** (PelvisDrive CONFIG, first-gains stable): HOVER
+  30/9 cap 1.8 g · UP 55/10 cap 120 · YAW 35/6 · DRIVE 5 cap 70 · SPEED 16 ·
+  RISE_BOOST 2.5 · HEIGHT 2.7. Knockdown cycle: fell 0.05 s, stable stand
+  3.15 s, repeatable.
+- **NEXT: PHASE 3 — collapse & recovery on the pelvis architecture**
+  (UPRIGHT/STUMBLE/DOWN/GETUP; physical get-up replaces the assisted pivot).
+  Known pelvis gaps to absorb into Phase 3 planning: **jump is dead**
+  (Jumping ability drove the capsule), **stairs** = single-ray hover (user
+  passed it, but expect polish), **sprint multiplier in pelvis mode**
+  works per-link but never end-to-end verified, animations may read
+  confused (ability state machine thinks it's falling), and the BT slider
+  is capsule-only — the pelvis equivalents are UP_* / tone.
+- Carried bookkeeping (now for Gate 3): numeric **recv KB/s** was never
+  recorded at a gate; `list_roblox_studios` test-instance question
+  (04_PREFLIGHT §2) still open.
 - Read the ☠️ workflow laws in CLAUDE.md § THE ENVIRONMENT before touching
   anything, plus the **MCP live-testing laws** in the Phase 2 session-1 entry
   below (custom IAS instances wedge input sync; one keyboard burst per play
-  session; file sync pauses during Play mode).
+  session; file sync pauses during Play mode; no Touched:Connect inside
+  simulation callbacks).
 
 ---
 
@@ -669,6 +666,24 @@ pelvis-mode complaint (occasional get-up pin) + one console error, all fixed:
 **Next: 2-client netsim A/B (observing-client readability) → pivot decision
 → if pelvis wins, docs update (00_ENGINE_FACTS locomotion section, CLAUDE.md
 scope line) and the capsule path becomes legacy.**
+
+---
+
+## 2026-07-15 — ✅ GATE 2 PASSED — and the architecture pivoted
+
+User ran the full pass (feel + 2-client netsim): **"Good to go, testing
+complete no issues."** Gate items: walks/runs no jitter ✓ (pelvis mode);
+sprint-into-wall stumbles/falls ✓; stairs ✓ (user pass; single-ray hover —
+expect Phase 3 polish); balance-knob-eases-knockdown ✓ (verified on the
+capsule BT ladder; pelvis equivalent is tone/UP_*); observing client clean ✓.
+
+**Pivot made official at this gate:** PelvisMode defaults ON at spawn
+(seeded in MuscleServer sim step); CLAUDE.md scope line and
+00_ENGINE_FACTS § 2 updated; the CCL capsule is the legacy A/B toggle and
+input conduit. Recv-KB/s number + list_roblox_studios check carry to Gate 3.
+
+**Verdict:** gate closed, pelvis-driven is the architecture, Phase 3 builds
+the state machine on it.
 
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)

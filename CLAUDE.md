@@ -30,7 +30,8 @@ powered constraint that *strives* toward an animated pose and can fail to reach 
 ### ✅ IN SCOPE
 - Powered joints (`AnimationConstraint`, `IsKinematic = false`)
 - The muscle system (per-joint strength, and everything that modulates it)
-- Balance & locomotion (Character Controller Library)
+- Balance & locomotion (**pelvis-driven forces** — `Shared/PelvisDrive.luau`,
+  the Gate 2 pivot; CCL retained as input conduit + legacy A/B toggle)
 - Collapse & emergent recovery (the state machine)
 - Trauma (limb damage, bleed) expressed as muscle failure
 - Two independent IK arms

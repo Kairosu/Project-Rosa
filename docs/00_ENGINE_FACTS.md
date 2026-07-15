@@ -134,6 +134,24 @@ long-standing issues."* **Unverified. Test, don't assume.**
 # 2. CHARACTER CONTROLLER LIBRARY (CCL)
 ### *Full release 30 April 2026. Replaces Humanoid movement.*
 
+> ## ⚡ ARCHITECTURE PIVOT — 15 JUL 2026 (Gate 2)
+> **Locomotion, support, and balance are now PELVIS-DRIVEN**
+> (`Shared/PelvisDrive.luau`): compliant hover/upright/drive forces on the
+> LowerTorso, all scaled by muscle tone. Decided by live A/B + 2-client
+> netsim (user verdict: "feels way better, less like it's fighting itself").
+> The deciding engine fact: **under balance the CCL capsule is
+> orientation-LOCKED** — a driven 2 rad/s tip sustained 1.5 s left its
+> up-vector at 1.00. It is a servo, not a spring; it cannot be overpowered
+> gradually, which is fatal for a readable-body game. The capsule's
+> collidable HRP box (pelvis ball-socketed to it) also caused every
+> "pinned hips" bug class (see tuning log 2026-07-14/15).
+> **CCL remains in place as the INPUT CONDUIT** (`cm.MovingDirection`,
+> ability attributes like `Running.SpeedMultiplier`) and as the legacy A/B
+> mode (panel toggle, attr `PelvisMode`). Its force properties are
+> permanently released in pelvis mode; the HRP rides as a non-collidable
+> ghost. Everything below about CCL still applies to the conduit + legacy
+> path — but new balance/locomotion work targets `PelvisDrive`.
+
 Character logic moved out of the Humanoid "black box" into **transparent, extensible Luau**.
 Composed of the **AvatarAbilities Library** + **`ControllerManager`**.
 

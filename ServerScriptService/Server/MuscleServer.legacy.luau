@@ -177,6 +177,11 @@ local function simStep(_dt: number)
 		-- tone restores after downTime, and restoring tone is also what lifts him back
 		local FALL = MuscleSystem.CONFIG.FALL
 		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		-- pelvis-driven is THE architecture since the Gate 2 pivot; the panel
+		-- toggle flips back to the legacy capsule for A/B only
+		if character:GetAttribute(PelvisDrive.CONFIG.MODE_ATTR) == nil then
+			character:SetAttribute(PelvisDrive.CONFIG.MODE_ATTR, true)
+		end
 		-- pelvis mode: the capsule is a dangling ghost — the PELVIS is the
 		-- posture truth for every fall/rise decision
 		local pelvisMode = character:GetAttribute(PelvisDrive.CONFIG.MODE_ATTR) == true
