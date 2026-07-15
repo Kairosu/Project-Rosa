@@ -569,6 +569,25 @@ re-pinning landed in a state NO code path could ever leave: the frozen pin.
 Verified: forced explosion-reset mid-fall → back standing armed (up 1.00,
 FS=up), next tilt releases in 0.03 s (old code: never — the eternal pin).
 
+**Addendum 4 (same day) — THE MID-AIR PIN: the HRP is a collidable box.**
+User capture (prop collision, with Pwr/FS columns): knockdown fired INSTANTLY
+and correctly (FS=down, SF=0, MT=0.08 at the hit) — yet the body hung 1.3 s
+at standing height, near-upright, fully released. Nothing in the force system
+held it. What held it: **the HumanoidRootPart is an invisible 2×2×1
+COLLIDABLE box with the pelvis ball-socketed to it** — the box landed on top
+of the prop and the limp body dangled from it. Same mechanism as the earlier
+"pinned INTO the wall by the hips" (box leans on wall). The force-side
+releases were never enough; the pin was collision GEOMETRY, not forces.
+- Fix: while released, `HumanoidRootPart.CanCollide = false` (per-step
+  enforced in setCapsuleReleased). The 18.5-mass body drags the 2.0-mass
+  ghost box wherever it heaps; nothing can snag. Restored with the rise
+  (getUpAssist pivots +3 first, same step, so it re-collides above ground).
+- Verified on a reproduced prop knockdown (dropped tilted onto a 4-stud
+  crate): dangling signature 1.3 s → **0.28 s** (residue = the body itself
+  sliding off the crate), and it recovered to a legitimate stand ON the
+  crate. The DOWN state is now a true free ragdoll — an architecture-
+  independent property any future locomotion system also needs.
+
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items

@@ -443,6 +443,16 @@ function MuscleSystem.setCapsuleReleased(character: Model, released: boolean, mo
 		if m.BaseMoveSpeed ~= speed then
 			m.BaseMoveSpeed = speed
 		end
+		-- the HRP is an INVISIBLE COLLIDABLE BOX with the pelvis ball-socketed
+		-- to it. Zero forces is not enough: the box physically rests on props
+		-- and leans on walls, and the limp body dangles from it ("pinned mid
+		-- air", caught on the recorder — released, up≈0.9, hanging at prop
+		-- height for 1.3 s). While ragdolled it must be a GHOST: the heavy
+		-- body (18.5 vs 2.0) drags it wherever the body heaps.
+		local hrp = character:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") and hrp.CanCollide ~= not released then
+			hrp.CanCollide = not released
+		end
 	end)
 end
 
