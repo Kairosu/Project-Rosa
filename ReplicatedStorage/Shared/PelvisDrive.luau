@@ -20,6 +20,8 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local IS_SERVER = RunService:IsServer()
+
 local MuscleSystem = require(script.Parent:WaitForChild("MuscleSystem"))
 local GetupPose = require(script.Parent:WaitForChild("GetupPose"))
 
@@ -118,7 +120,7 @@ function PelvisDrive.idle(character: Model)
 	end
 end
 
-function PelvisDrive.step(character: Model, _dt: number)
+function PelvisDrive.step(character: Model, dt: number)
 	local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
 	local cm = character:FindFirstChildOfClass("ControllerManager")
 	if not pelvis or not cm then
@@ -179,7 +181,19 @@ function PelvisDrive.step(character: Model, _dt: number)
 		-- torque ceiling now, where the architecture doc always put it.)
 		local err = height - (pelvis.Position.Y - hit.Position.Y)
 		local fy = m * (g + err * CONFIG.HOVER_K - v.Y * CONFIG.HOVER_D)
-		force = Vector3.new(0, math.clamp(fy, 0, m * g * CONFIG.HOVER_CAP_G * mt * boost), 0)
+		local support = math.clamp(fy, 0, m * g * CONFIG.HOVER_CAP_G * mt * boost)
+		force = Vector3.new(0, support, 0)
+		-- WEIGHT TRANSFER: the hover is a virtual leg, and a leg PRESSES on
+		-- what it stands on. Without the reaction, a hovering character
+		-- weighs ~nothing on whatever is under him — Gate 3 stand-on-him
+		-- failed exactly this way: the pinning player's weight never reached
+		-- the downed body, and it lifted him like air. Server-only (the
+		-- pressed body is server-simulated; a client-side press on someone
+		-- else's parts would just be a misprediction).
+		if IS_SERVER and hit.Instance and hit.Instance:IsA("BasePart") and not hit.Instance.Anchored then
+			local stepDt = if type(dt) == "number" then dt else 1 / 60
+			hit.Instance:ApplyImpulseAtPosition(Vector3.new(0, -support * stepDt, 0), hit.Position)
+		end
 		-- drive, grounded only
 		local mult = 1
 		if r.running then

@@ -940,3 +940,32 @@ release and full-tone muscles snap to idle. Two-value fix:
   the spine unfurling through the clip tail, not snapping before it ends.
 Sanity crate after the change: ONE attempt, hit→standing 3.7 s, height
 settles 2.88→2.83. riseTimeout 2.6 / CLIP_TIME 2.0 confirmed compatible.
+
+## ADDENDUM 10 — 15 JUL (late): Gate 3 run #1 — stand-on-him FAILED → hover weight transfer
+
+**User's 2-client run:** falls/stumbles/getups read well on the observing
+client ("works well with the two clients"); RC 0.4 buckle reads correctly
+(tries and buckles). **Stand-on-him FAILED: the downed player got up with a
+player standing on him.** Root cause is structural, not tuning: the pelvis
+hover is a VIRTUAL leg — it carries a character with an external VectorForce
+instead of pressing through the feet, so a hovering character weighs almost
+NOTHING on whatever is under him. B's weight never reached A's body.
+
+**Fix (PelvisDrive):** the hover support force now applies its reaction —
+`ApplyImpulseAtPosition(-support·dt)` at the ray hit, server-only, skipped
+for anchored parts/terrain (no-op there anyway). Verified by instrument:
+identical plates given identical 12-stud/s kicks, the one under a hovering
+character slid 0.41× the control's distance (friction from the transferred
+normal force). Static-margin math for the retest: A's getup support cap is
+1.8 g × 20 mass ≈ 36 units of lift vs A's own 20 + B's transferred ~20 = 40
+pressing down — A should stay pinned, and rise when B steps off.
+
+**Emergent side effect (intended, watch it):** characters now press down on
+PROPS they stand on — loose crates tip/shoot underfoot. That is Sub Rosa
+physicality, but it changes any test that involved standing on objects.
+
+**Bookkeeping:** the multi-client test instances do NOT register with the MCP
+(`list_roblox_studios` shows only the editing Studio — 04_PREFLIGHT §2 now
+answered); the recv KB/s number therefore comes from the DebugPanel line
+("recv: N KB/s", already on screen) during the user's run — READ IT ALOUD at
+the retest. Gate 3 remains OPEN pending: stand-on-him retest + recv KB/s.
