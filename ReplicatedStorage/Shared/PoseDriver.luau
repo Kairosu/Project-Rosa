@@ -5,17 +5,22 @@
 -- application — our write wins without breaking retargeting):
 --
 -- 1. GETUP: overwrite all 15 joint Transforms with the GetupPose clip at the
---    replicated GT clock. The muscles strive toward it at ramping tone — the
---    body physically pushes itself up. No blend exists anywhere.
+--    replicated GT clock — SERVER ONLY (see the Transform-ownership law in
+--    step below: client Transform writes are placebo under SA prediction; the
+--    actor's own client renders the getup from replicated physics, limp).
+--    The muscles strive toward it at ramping tone — the body physically
+--    pushes itself up. No blend exists anywhere.
 -- 2. STUMBLE: arm flail via IKControl — targets driven from a counter of the
---    pelvis's angular velocity. It looks correct because it IS correct.
---    IK never replicates (engine fact): every peer runs this same solve from
---    the same replicated state.
+--    pelvis's angular velocity. IK is applied by the engine's own animation
+--    layer, so it works on every peer; each peer solves from the same
+--    replicated state.
 --
 -- Wire once per peer with PoseDriver.wire(getCharacters): the server passes
--- all player characters, the client passes only its own (prediction).
+-- all player characters, the client passes only its own (flail prediction).
 
 local RunService = game:GetService("RunService")
+
+local IS_SERVER = RunService:IsServer()
 
 local MuscleSystem = require(script.Parent:WaitForChild("MuscleSystem"))
 local GetupPose = require(script.Parent:WaitForChild("GetupPose"))
@@ -106,8 +111,35 @@ function PoseDriver.step(character: Model, dt: number)
 		return
 	end
 
-	-- GETUP: write the clip pose into every joint Transform
-	if fs == "getup" then
+	-- ☠️ TRANSFORM OWNERSHIP (verified live 15 JUL, four instrumented rounds):
+	-- with ANY track playing, the Animator's apply lands AFTER every script
+	-- hook — PreSimulation and BindToSimulation, BOTH peers — and eats the
+	-- clip. On the SA-predicted client even track-less script writes never
+	-- survive the frame. Consequences, both handled here:
+	--   1. the clip writes are SERVER-ONLY (the actor's own client goes
+	--      muscle-limp during getup — MuscleSystem.step — and reads the rise
+	--      as replicated physics, like observers always have);
+	--   2. the server must STOP the tracks itself for the clip to win.
+	--      FallingDown used to do this by accident, but that state is driven
+	--      by the platform ability scripts via ChangeState — not ours, not
+	--      deterministic: one Running-flagged getup let idle eat the clip and
+	--      the body popped up straight-legged in 0.6 s (caught on the probe).
+	if IS_SERVER and (fs == "getup" or fs == "down") then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, track in animator:GetPlayingAnimationTracks() do
+				-- Stop(0), not a fade: when the platform flips the humanoid to
+				-- Running mid-getup the animate script restarts tracks, and a
+				-- fading track still OWNS Transform while it dies — idle ate
+				-- clip frames through the fade (verified on the retest probe)
+				track:Stop(0)
+			end
+		end
+	end
+
+	-- GETUP: write the clip pose into every joint Transform (server only)
+	if fs == "getup" and IS_SERVER then
 		if not r.wasGetup then
 			r.wasGetup = true
 			r.faceUp = GetupPose.isFaceUp(pelvis) -- latched: no mid-clip flips

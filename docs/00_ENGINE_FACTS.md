@@ -106,6 +106,30 @@ RunService.PreSimulation:Connect(function(dt)
 end)
 ```
 
+### ☠️ TRANSFORM OWNERSHIP UNDER SA — the doc above LIES in practice (verified 15 JUL 2026)
+Four instrumented live rounds (force-writes + end-of-frame reads, both DMs):
+
+1. **With ANY animation track playing, the Animator's apply lands AFTER every
+   script hook** — `PreSimulation` AND `BindToSimulation`, on BOTH peers. A
+   playing idle track ate the getup clip on the server and the body popped up
+   straight-legged in 0.6 s. Script `Transform` REPLACEMENT only wins while the
+   tracks are STOPPED. (The documented ordering may hold for *multiplying into*
+   a track's output; it does not hold for replacing it.)
+2. **On the SA-predicted client, script `Transform` writes NEVER survive the
+   frame** — tracks playing or not, any hook (60° force-writes read back 0 at
+   Heartbeat, every frame, both hooks tested). Layer-1 pose writes are
+   **SERVER-ONLY**. The actor's own client must read a server-posed body the
+   way observers do: as replicated physics (limp muscles = no tug-of-war).
+3. **Humanoid state replicates server→client and the platform ability scripts
+   drive it via `ChangeState`**, which bypasses `SetStateEnabled` — client-side
+   `SetStateEnabled` is a no-op in practice, and `FallingDown` fires
+   engine-side on knockovers. `FallingDown` stops all animation tracks (that
+   accident is the ONLY reason early clip tests "worked" server-side). If a
+   pose write must win, STOP THE TRACKS yourself, deterministically.
+4. **Client-side `SetAttribute` on a server-replicated character is reverted
+   by the server sync within a frame.** Client-local sim state must be
+   computed, never written to shared attributes.
+
 ### 🔴 KNOWN ISSUE — the #1 risk of this project. Read it.
 > *"In some situations, players can see **choppy physics replication on other characters**.
 > This happens because clients play Animations and replicated physics on slightly different

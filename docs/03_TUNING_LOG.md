@@ -2,8 +2,26 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
+**As of 2026-07-15 (night): PHASE 3 REWIRED after the user's regression report
+— the getup clip was NEVER VISIBLE on the actor's own screen. Root cause found
+by live instrumentation (Addendum 8, and the new ☠️ Transform-ownership law in
+00_ENGINE_FACTS §1): under SA, the client cannot write joint Transforms at all,
+and a playing track eats them on the server too. Fix set (this commit):
+server-only clip + server stops tracks during down/getup + actor's client goes
+muscle-limp during getup (reads the rise as replicated physics, like the down
+phase always has) + rise-fail pelvis-velocity bleed (kills the "flung inverted
+between attempts" hit) + per-step FallingDown→Running enforcement while upright
+(kills the post-fall jittery/fall-anim walk). Retested by instrument same
+night: actor's-eye getup organic, buckle transitions clean, post-fall walking
+clean. NEEDS: user solo feel pass (eyes on the getup + walking), then the
+2-client Gate 3 run.**
+
+---
+
 **As of 2026-07-15 (late): PHASE 3 BUILD COMPLETE, solo-verified. Awaiting
-user feel pass + the 2-client Gate 3 run.**
+user feel pass + the 2-client Gate 3 run.** *(superseded above — "solo-verified"
+was an illusion: every solo check read SERVER state, and the server-side look
+never reached the actor's client.)*
 - **The four-state machine is live** (FS: upright/stumble/down/getup), and the
   get-up is PHYSICAL — the teleport pivot is a loud last-resort only (fired
   once in ~15 knockdown cycles today, on a prone attempt).
@@ -733,3 +751,83 @@ the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items
 
 ---
+
+## ADDENDUM 8 — 15 JUL (night), Phase 3 session 2: the clip was invisible to its own actor
+
+**User report after the look pass:** walking "super jittery… like we're only
+walking with our right leg, the left leg stays to the rear up in the air";
+getup "sometimes stiff… pinned at the hips and just rotating up… limbs pull
+into regular idle pos's… sometimes it's like we get hit again."
+
+**Instrumented live (fire-and-forget samplers in both DMs, thrown-crate
+knockdowns, force-write probes). Findings, in discovery order:**
+
+1. **Server clip was perfect; the client never saw it.** During getup the
+   server's joint targets tracked the authored keys exactly; the client's sat
+   at IDENTITY the whole clip. The actor's screen = client sim → muscles at
+   ramping tone pulling limbs to the neutral pose while hover lifts =
+   literally "limbs pull to regular spots, go stiff, rotate up".
+2. **Force-write experiments** (60° into LeftHip.Transform every frame during
+   getup, read back at Heartbeat): client PreSimulation write → 0. Client
+   BindToSimulation write → 0. Even with humanoid Running (tracks playing),
+   the idle values won. On the server, disabling FallingDown let idle KEEP
+   playing through a getup — and the idle track ate the clip THERE too (body
+   popped up straight-legged in 0.6 s). Full law → 00_ENGINE_FACTS §1
+   "TRANSFORM OWNERSHIP UNDER SA".
+3. **The walking bug is the humanoid state machine.** FallingDown (engine
+   trip state, fired by the platform ability scripts via ChangeState —
+   SetStateEnabled is bypassed and the state REPLICATES) stops every
+   animation track; the flapping in/out after falls = jittery gait + the
+   stock fall pose (one leg trailing up behind). A clean gentle walk sampled
+   Running + walk/run blend the whole way — contamination is post-fall.
+4. **The "hit again mid-getup" read**: between failed rise attempts the tone
+   cut released hover+spring momentum ballistically — probe caught the pelvis
+   at standing height, INVERTED, at tone 0.
+5. Two more laws for the book: client SetAttribute on the character is
+   reverted by server sync within a frame (a live limp-prototype via MJ_
+   attrs silently never applied); LogService:GetLogHistory() returns empty in
+   both play DMs — hook LogService.MessageOut / ScriptContext.Error live
+   instead.
+
+**Fix set (commit this session):**
+- `PoseDriver`: clip writes SERVER-ONLY; server stops all playing tracks
+  every step while FS ∈ {down, getup} (Stop(0.1)) — determinism instead of
+  the FallingDown accident. Flail (IKControl) untouched — engine-applied,
+  works on every peer.
+- `MuscleSystem.step`: on the CLIENT, getup ⇒ legF/armF/spineF = 0 (limp).
+  The actor reads their own rise as replicated physics — the same channel
+  that already made the down phase and every observer's view read clean.
+  (Down needed nothing: MT is already 0 there, which is WHY it always looked
+  right.)
+- `MuscleServer`: rise-fail transition bleeds pelvis velocity (×0.3
+  horizontal, Y clamped ≤0, angular ×0.3); per-step while FS
+  upright/stumble: humanoid FallingDown/GettingUp/Ragdoll → ChangeState
+  Running via task.defer (state writes are wiring — off the sim timeline).
+- Docs: ENGINE_FACTS §1 new ☠️ block (the four sub-laws above).
+
+**Open questions for the retest:** does the limp-follow getup read organic on
+the actor's screen in solo (expected: yes at 0 latency — it IS the server
+pose) and at 150 ms netsim (expected: slightly delayed but coherent; the
+actor has no control during getup anyway)? Does track-stopping fight the
+platform animate script visibly on recovery (idle should resume on the
+Running events)?
+
+**Retest (same night, instrumented solo — crate knockdowns, dual-DM samplers):**
+- **Actor's-eye getup FIXED.** Client AS = 0 through the whole down+getup; the
+  client hip now arcs organically through the push (37→73→87° following the
+  server's clip-driven body) instead of pulling straight to identity. Stands
+  on attempt 1–3; transitions between failed attempts read as a buckle-and-
+  collapse (no launch, no inversion) after widening the velocity bleed to
+  EVERY part — under AJU each body part is its OWN assembly; a pelvis-only
+  bleed let the other 14 parts yank it right back up.
+- `track:Stop(0)` not `Stop(0.1)`: a fading track still owns Transform while
+  it dies and idle ate clip frames through the fade when the platform flipped
+  the humanoid to Running mid-getup.
+- **Post-fall walking verified clean** (keyboard burst): speed 15–16, full
+  gait swing both legs, humanoid pinned Running, no fall-anim contamination.
+- **Watch items (cosmetic, user should eyeball):** (1) after recovery the
+  idle track sits at partial weight (~0.4 vs 1.0 fresh-spawn) so the standing
+  pose reads slightly straighter-legged until the next movement; gait itself
+  fully normal. (2) GT attr stays stale between falls (harmless, writes are
+  FS-gated). (3) `script_grep` can lag `script_read` after rapid file edits —
+  trust script_read when they disagree.

@@ -253,6 +253,20 @@ local function simStep(_dt: number)
 							-- retry — that IS the intended read (Gate 3 item 3)
 							character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
 							st.fallTimer = FALL.retryDown
+							-- a failed rise carries hover+spring momentum; cutting
+							-- tone releases it ballistically (probe: pelvis flung to
+							-- standing height, INVERTED, between attempts — read as
+							-- "hit again"). Bleed it at the transition — EVERY part:
+							-- under AJU each body part is its own assembly, and a
+							-- pelvis-only bleed let the other 14 yank it right back
+							-- up (verified: still tossed to pY 2.9 inverted).
+							for _, part in character:GetChildren() do
+								if part:IsA("BasePart") then
+									local pv = part.AssemblyLinearVelocity
+									part.AssemblyLinearVelocity = Vector3.new(pv.X * 0.3, math.min(pv.Y, 0), pv.Z * 0.3)
+									part.AssemblyAngularVelocity *= 0.3
+								end
+							end
 						end
 					end
 				end
@@ -389,6 +403,32 @@ local function simStep(_dt: number)
 			character:SetAttribute(MuscleSystem.CONFIG.STATE_ATTR, fs)
 		end
 
+		-- the platform ability scripts drive the legacy trip state via
+		-- ChangeState (bypasses SetStateEnabled) and it REPLICATES: on the
+		-- client, FallingDown stops every animation track mid-walk — the
+		-- post-fall "super jittery, one leg trailing in the air" walk the
+		-- user reported is the stock fall pose flapping in and out. While the
+		-- body is functionally upright, force the state machine back to
+		-- Running. task.defer: state changes are wiring, not sim math — keep
+		-- them off the simulation timeline (same law as Touched).
+		if fs == "upright" or fs == "stumble" then
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				local hs = humanoid:GetState()
+				if
+					hs == Enum.HumanoidStateType.FallingDown
+					or hs == Enum.HumanoidStateType.GettingUp
+					or hs == Enum.HumanoidStateType.Ragdoll
+				then
+					task.defer(function()
+						if character.Parent and character:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR) == fs then
+							humanoid:ChangeState(Enum.HumanoidStateType.Running)
+						end
+					end)
+				end
+			end
+		end
+
 		Locomotion.apply(character, st.sprint)
 		MuscleSystem.step(character)
 		MuscleSystem.updateBalance(character)
@@ -416,4 +456,5 @@ if not ok then
 	warn("[MuscleServer] BindToSimulation FAILED (" .. tostring(err) .. ") — Heartbeat fallback. CHECK Workspace.AuthorityMode = Server.")
 	RunService.Heartbeat:Connect(simStep)
 end
+
 

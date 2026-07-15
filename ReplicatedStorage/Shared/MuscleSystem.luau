@@ -9,8 +9,12 @@
 -- chars. 46 separate attributes bust the first; one big packed string busts the
 -- second. Per-joint triples fit both. Strings re-parse only when they change.
 
+local RunService = game:GetService("RunService")
+
 -- GetupPose is dependency-free; MuscleSystem → GetupPose is the only edge
 local GetupPose = require(script.Parent:WaitForChild("GetupPose"))
+
+local IS_CLIENT = RunService:IsClient()
 
 local CONFIG = {
 	MASTER_TONE_ATTR = "MT",
@@ -419,13 +423,26 @@ function MuscleSystem.step(character: Model)
 	if state == "stumble" then
 		legF = math.max(MuscleSystem.impactFactor(character), CONFIG.STUMBLE_LEG_FLOOR)
 	elseif state == "getup" then
-		local p = GetupPose.progress(tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0)
-		local function ease(from: number, to: number): number
-			local x = math.clamp((p - from) / math.max(to - from, 1e-3), 0, 1)
-			return x * x * (3 - 2 * x)
+		if IS_CLIENT then
+			-- ☠️ the SA-predicted client can never see the clip targets — the
+			-- Animator owns Transform there and lands after every script hook
+			-- (verified live 15 JUL: PreSim writes, BindToSimulation writes,
+			-- both stomped every frame). Muscles striving toward the identity
+			-- pose the client CAN see is a tug-of-war against the server's
+			-- corrections and reads as "stiff limbs, hips pinned, rotating
+			-- up". Go limp instead: the actor's own getup arrives as
+			-- replicated physics — the same channel that already makes the
+			-- down phase and every OTHER player's body read clean.
+			legF, armF, spineF = 0, 0, 0
+		else
+			local p = GetupPose.progress(tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0)
+			local function ease(from: number, to: number): number
+				local x = math.clamp((p - from) / math.max(to - from, 1e-3), 0, 1)
+				return x * x * (3 - 2 * x)
+			end
+			legF = 0.45 + 0.55 * ease(0.15, 0.5)
+			spineF = 0.35 + 0.65 * ease(0.3, 0.75)
 		end
-		legF = 0.45 + 0.55 * ease(0.15, 0.5)
-		spineF = 0.35 + 0.65 * ease(0.3, 0.75)
 	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any
