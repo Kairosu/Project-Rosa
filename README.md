@@ -5,10 +5,10 @@ A fully physically-simulated character for Roblox. Every joint is a powered cons
 
 **This repo builds the body. Nothing else.**
 
-**Workflow: MCP-first. The Studio place is the single source of truth for all code.**
-There is no filesystem sync. Claude Code works on scripts inside Studio directly, through
-the Roblox Studio MCP. This repo holds the docs, the tuning log, and gate-by-gate script
-snapshots — never live code.
+**Workflow: Roblox Studio's built-in script file sync + the Studio MCP.**
+Scripts are edited as local `.luau` files in this repo and Studio mirrors them into the
+place both ways (no Rojo). The MCP handles everything that isn't script source: running
+Luau, playtests, inspection, screenshots. Details in `CLAUDE.md` § THE ENVIRONMENT.
 
 ---
 
@@ -26,8 +26,8 @@ snapshots — never live code.
 `Motor6D`. If they're Motor6D, AJU isn't on and nothing in this repo will work.
 
 ### 2. Iris (the one dependency)
-Download the rbxm from the latest release of SirMallard/Iris on GitHub and drop it into
-`ReplicatedStorage`. Iris has no external dependencies — no package manager needed.
+Already vendored as source at `ReplicatedStorage/Shared/Iris/` (SirMallard/Iris,
+commit 1836220). Iris has no external dependencies — no package manager needed.
 
 ### 3. ⭐ Connect the Roblox Studio MCP to Claude Code
 **With no file sync, the MCP is Claude Code's ONLY access to the code.** It must work.
@@ -47,9 +47,9 @@ Open Claude Code in this directory. First session: paste the verification messag
 `CLAUDE.md` is auto-loaded and points at everything else. Phases and their hard gates are
 in `docs/02_PHASES.md`, tested on two clients under simulated latency + packet loss.
 
-**At every passed gate:** Claude Code snapshots all scripts (via MCP) into `snapshots/`,
-commits, and you publish the place — Roblox's own version history is the rollback point
-between snapshots.
+**At every passed gate:** Claude Code commits the repo (the script folders are the live
+code, via file sync), and you publish the place — Roblox's own version history is the
+rollback point for non-script state.
 
 ---
 

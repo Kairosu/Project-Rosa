@@ -91,9 +91,10 @@ When the user says *"start phase N"*:
 4. Build only what that phase needs
 5. Run the gate. Report honestly whether it passed.
 6. **Append any tuned values to `docs/03_TUNING_LOG.md`**
-7. **Snapshot every project script (via `script_read`) into `snapshots/gateN_<name>/` and
-   commit.** That is the code's version history — skipping it means the gate's code exists
-   only inside one .rbxl.
+7. **Commit and push at the gate** (`gate N passed: <one line of what held>`). The repo's
+   script folders ARE the live code (Studio file sync), so the commit is the snapshot.
+   Non-script state (workspace instances, place settings) lives only in the place —
+   remind the user to **publish** at every gate; Roblox version history is its rollback.
 
 ### The tuning log is not optional
 This is a coupled PD-controller system across 15 joints. The stable region is found
@@ -102,27 +103,39 @@ and not written down, it is lost. Log every value that survives a gate.
 
 ---
 
-## THE ENVIRONMENT — MCP-FIRST. NO FILESYSTEM SYNC.
+## THE ENVIRONMENT — STUDIO FILE SYNC FOR CODE, MCP FOR EVERYTHING ELSE.
 
-**The Studio place is the single source of truth for all code.** There is no Rojo. You
-work on scripts directly inside Studio through the Roblox Studio MCP: `script_read`,
-`multi_edit`, `script_search`, `script_grep`, `execute_luau`, `inspect_instance`,
-`search_game_tree`, playtest control, screen capture. **Use them.** Do not ask the user
-to verify something you can verify yourself.
+*(Updated 14 JUL 2026 — verified live. This supersedes the original "MCP-only, no
+filesystem sync" plan: Roblox's built-in script file sync is ON for this place.)*
 
-- **The MCP must be alive before any work.** It is your only access to the code. If it is
-  not connected, or a call times out, STOP and tell the user — do not improvise a
-  copy-paste workflow, and do not write code into this repo expecting someone to move it.
-- **Iris** is the one dependency, installed as an rbxm in `ReplicatedStorage` (no package
-  manager).
-- **This repo holds docs, the tuning log, and script snapshots — never live code.**
+**Scripts are edited as local `.luau` files in this repo.** Studio's built-in file sync
+mirrors them into the place, both directions, near-instantly. Verified conventions:
 
-### The snapshot ritual (this is the code's version control)
-At every passed gate: `script_read` every project script and write them to
-`snapshots/gateN_<name>/` in this repo, preserving the Studio hierarchy in the folder
-structure. Then commit. That is the diffable history. Between snapshots, the published
-place's own version history on Roblox is the rollback point — remind the user to publish
-at each gate.
+- Mapped subtrees: `ReplicatedStorage/Shared/` · `ServerScriptService/Server/` ·
+  `StarterPlayer/StarterPlayerScripts/Client/`. **New files sync ONLY inside these three
+  folders** — a new top-level child of a service dir (e.g. `ReplicatedStorage/Foo.luau`)
+  is silently ignored. All project code lives under Shared / Server / Client.
+- Naming: `Name.luau` = ModuleScript · `Name.local.luau` = LocalScript ·
+  `Name.legacy.luau` = legacy Script · script-with-children = `Name/init.luau` + siblings
+  (Rojo-style). Edits, creations, and deletions all sync both ways.
+- **Iris** is the one dependency, vendored as source at `ReplicatedStorage/Shared/Iris/`
+  (SirMallard/Iris, commit 1836220, May 2026).
+
+**The MCP is for everything that is not script source:** `execute_luau`, playtest control
+(`start_stop_play`), `inspect_instance`, `search_game_tree`, console output, screen
+capture, `user_mouse_input` (UI clicks — use `instance_path`, screen coords are
+DPI-unreliable). **Use them.** Do not ask the user to verify something you can verify
+yourself. Known capability limits of `execute_luau` (verified): `Workspace.AuthorityMode`
+and `StarterPlayer.AvatarJointUpgrade` are RobloxScript-protected — read AND write — in
+every DataModel. Those are Properties-panel-only; ask the user. It CAN write
+`CharacterControlMode`, `CharacterBreakJointsOnDeath`, create instances, and set
+`Script.Source`.
+
+### Version control
+The repo holds the live scripts, so **plain git commits are the code history** — commit
+at every passed gate. Non-script state (test room instances, place settings) exists only
+in the place: the user **publishes at every gate** and Roblox place version history is
+that layer's rollback point.
 
 ### Testing is two-client, laggy, always
 Every gate is tested with **two clients** under **network simulation** (150ms latency,
