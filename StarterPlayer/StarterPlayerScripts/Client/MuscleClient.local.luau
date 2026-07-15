@@ -14,6 +14,8 @@ local player = Players.LocalPlayer
 local function simStep(_dt: number)
 	local character = player.Character
 	if character then
+		local _, peakRel = MuscleSystem.scanBody(character)
+		MuscleSystem.noteImpact(character, peakRel, if type(_dt) == "number" then _dt else 1 / 60)
 		MuscleSystem.step(character)
 		MuscleSystem.updateBalance(character)
 	end

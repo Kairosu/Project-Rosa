@@ -18,6 +18,17 @@ local CONFIG = {
 	-- stability guard trip-wires; generous — a real fall is well under these
 	RUNAWAY_LINEAR = 512,
 	RUNAWAY_ANGULAR = 250,
+	-- impact reflex: the ball socket decouples body hits from the capsule, so passive
+	-- knockdowns don't exist — balance must DIP when the body takes a hit. Body-part
+	-- speed relative to the root above `threshold` dips balance torque linearly,
+	-- reaching zero (a guaranteed fall) at `fallAt`. Proportionality lives here.
+	-- threshold 25: getup/recovery motions reach ~20 rel and must NOT re-trigger —
+	-- an 18 threshold made the reflex sabotage its own recoveries (perpetual stumble
+	-- cycle, verified live). Also upright-gated in noteImpact for the same reason.
+	-- rearm: after any firing the reflex is locked out until the window fully expires
+	-- (stagger + rearm) — without it, crossing back over the upright gate while still
+	-- moving fast re-triggers the dip and the body struggles at the boundary forever.
+	IMPACT = { threshold = 25, fallAt = 55, staggerTime = 0.6, uprightGate = 0.7, rearm = 2.0 },
 	-- per-joint driver defaults {strength, damping, torque}. Baseline = AJU factory
 	-- values (tuning log 2026-07-14). Root-ward joints get extra damping per the official
 	-- anti-oscillation recipe: they don't "see" downstream chain mass.
@@ -43,18 +54,19 @@ local CONFIG = {
 	-- Compliant balance ceiling. Scaled by tone: weak body = easy to topple. Rigid
 	-- balance is FORBIDDEN on a powered body — it injects hard reaction impulses
 	-- through the Root socket every solver step (verified live: perpetual flail).
-	-- 2000 verified as stable as 10000; still unknockable because chain mass is tiny —
-	-- the knockdown sweep (density × balance × muscle rescale) is next session's work.
-	BALANCE_TORQUE = 2000,
-	-- Human-ish mass distribution; a shove must move MASS, not feather-limbs. R15
-	-- blocky part volumes are minuscule (chain = 1.8 vs HRP 2.0 even at these
-	-- densities) — expect to raise these ×10-20 during knockdown tuning.
+	-- Baseline balance. Stand is solid all the way down to 300; passive knockdowns
+	-- never happen at ANY value (the Root socket decouples body hits from the
+	-- capsule) — falls come from the impact reflex dipping this, not from lowering it.
+	BALANCE_TORQUE = 800,
+	-- Human-ish mass distribution at chain ≈ 18.5 vs HRP 2.0. Stand quality is
+	-- IDENTICAL to the near-massless rig (strength is frequency-normalized, gains
+	-- track mass automatically) but hits now transfer real momentum.
 	DENSITY = {
-		LowerTorso = 1.2, UpperTorso = 1.0, Head = 0.7,
-		LeftUpperLeg = 1.0, RightUpperLeg = 1.0, LeftLowerLeg = 0.7, RightLowerLeg = 0.7,
-		LeftFoot = 0.6, RightFoot = 0.6,
-		LeftUpperArm = 0.6, RightUpperArm = 0.6, LeftLowerArm = 0.4, RightLowerArm = 0.4,
-		LeftHand = 0.3, RightHand = 0.3,
+		LowerTorso = 12, UpperTorso = 10, Head = 7,
+		LeftUpperLeg = 10, RightUpperLeg = 10, LeftLowerLeg = 7, RightLowerLeg = 7,
+		LeftFoot = 6, RightFoot = 6,
+		LeftUpperArm = 6, RightUpperArm = 6, LeftLowerArm = 4, RightLowerArm = 4,
+		LeftHand = 3, RightHand = 3,
 	} :: { [string]: number },
 }
 
@@ -277,27 +289,77 @@ function MuscleSystem.updateBalance(character: Model)
 		if powered and mt <= CONFIG.COLLAPSE_BALANCE_THRESHOLD then
 			g.BalanceMaxTorque = 0
 		else
-			g.BalanceMaxTorque = CONFIG.BALANCE_TORQUE * (if powered then mt else 1)
+			local factor = if powered then mt * MuscleSystem.impactFactor(character) else 1
+			g.BalanceMaxTorque = CONFIG.BALANCE_TORQUE * factor
 		end
 	end)
 	MuscleSystem.lastBalanceError = if ok then nil else tostring(err)
 end
 
--- server-only trip-wire: NaN or runaway velocity on any body part
-function MuscleSystem.guard(character: Model): string?
+-- one body scan per step, both peers: returns (guard offender or nil, peak body-part
+-- speed relative to the root). The relative speed feeds the impact reflex; walking
+-- moves everything together so it stays near zero, a crate hit spikes it.
+function MuscleSystem.scanBody(character: Model): (string?, number)
+	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local rootVel = if hrp then hrp.AssemblyLinearVelocity else Vector3.zero
+	local offender: string? = nil
+	local peakRel = 0
 	for _, part in character:GetChildren() do
 		if part:IsA("BasePart") then
 			local v = part.AssemblyLinearVelocity
 			local w = part.AssemblyAngularVelocity
 			if v.X ~= v.X or w.X ~= w.X then
-				return part.Name .. " velocity is NaN"
+				offender = part.Name .. " velocity is NaN"
+			elseif v.Magnitude > CONFIG.RUNAWAY_LINEAR or w.Magnitude > CONFIG.RUNAWAY_ANGULAR then
+				offender = ("%s v=%.0f w=%.0f"):format(part.Name, v.Magnitude, w.Magnitude)
 			end
-			if v.Magnitude > CONFIG.RUNAWAY_LINEAR or w.Magnitude > CONFIG.RUNAWAY_ANGULAR then
-				return ("%s v=%.0f w=%.0f"):format(part.Name, v.Magnitude, w.Magnitude)
-			end
+			peakRel = math.max(peakRel, (v - rootVel).Magnitude)
 		end
 	end
-	return nil
+	return offender, peakRel
+end
+
+-- impact reflex state, per character per peer
+local impactState: { [Model]: { factor: number, timer: number } } = setmetatable({}, { __mode = "k" }) :: any
+
+function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
+	local st = impactState[character]
+	if st then
+		st.timer -= dt
+		if st.timer <= 0 then
+			impactState[character] = nil
+			st = nil
+		end
+	end
+	local imp = CONFIG.IMPACT
+	if peakRel > imp.threshold then
+		-- only a STANDING body can be knocked off balance; while tilted or rising the
+		-- reflex stays silent so it cannot sabotage its own recovery
+		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not hrp or hrp.CFrame.UpVector.Y < imp.uprightGate then
+			return
+		end
+		if st then
+			return -- active or re-arming: one dip per window, never a chain
+		end
+		local factor = math.clamp(1 - (peakRel - imp.threshold) / (imp.fallAt - imp.threshold), 0, 1)
+		impactState[character] = { factor = factor, timer = imp.staggerTime + imp.rearm }
+	end
+end
+
+function MuscleSystem.impactFactor(character: Model): number
+	local st = impactState[character]
+	if not st then
+		return 1
+	end
+	-- the dip only bites during the stagger window; the tail of the timer is re-arm
+	return if st.timer > CONFIG.IMPACT.rearm then st.factor else 1
+end
+
+-- kept for compatibility with callers that only want the trip-wire
+function MuscleSystem.guard(character: Model): string?
+	local offender = MuscleSystem.scanBody(character)
+	return offender
 end
 
 return MuscleSystem

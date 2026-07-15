@@ -154,8 +154,9 @@ local function simStep(_dt: number)
 			character:SetAttribute(MuscleSystem.CONFIG.MASTER_TONE_ATTR, newMt)
 		end
 
+		local offender, peakRel = MuscleSystem.scanBody(character)
+		MuscleSystem.noteImpact(character, peakRel, if type(_dt) == "number" then _dt else 1 / 60)
 		if st.settle == 0 and st.resetLock == 0 then
-			local offender = MuscleSystem.guard(character)
 			if offender then
 				warn("[MuscleServer] stability guard: " .. offender .. " — resetting " .. player.Name)
 				character:SetAttribute(MuscleSystem.CONFIG.POWERED_ATTR, false)
@@ -184,3 +185,4 @@ if not ok then
 	warn("[MuscleServer] BindToSimulation FAILED (" .. tostring(err) .. ") — Heartbeat fallback. CHECK Workspace.AuthorityMode = Server.")
 	RunService.Heartbeat:Connect(simStep)
 end
+

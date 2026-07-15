@@ -169,3 +169,54 @@ are in `MuscleSystem.CONFIG`.
 receive rate) plus the full 5-minute soak remain for the 2-client netsim run.
 
 ---
+
+## 2026-07-14 — Phase 1 (session 2) — knockdown sweep + the 5-minute soak
+
+**Density ×10 is the knockdown enabler and costs nothing.** Chain mass 1.8 → **18.5**
+(vs HRP 2.0) and the stand is *identical* — settles ≤1 frame, steady ≈1.4 stud/s —
+because `AngularStrength` is frequency-normalized (gains track mass automatically) and
+levers are short (torque 3000 ceilings still never saturate). Final densities are in
+`MuscleSystem.CONFIG.DENSITY` (LowerTorso 12 … Hand 3).
+
+**✅ 5-MINUTE STAND SOAK PASSED** (solo, gate item 1): six consecutive 50 s windows,
+worst window max |v| = **1.41 stud/s** (= the idle-sway animation), up-vector 1.00
+throughout, total drift 0.02 studs. Zero guard trips.
+
+**Impulse ladder (UpperTorso, horizontal), the proportional response (gate item 4):**
+
+| Impulse | peak rel speed | Result |
+|---|---|---|
+| 100 | ~17 | holds footing (below reflex threshold) |
+| 250 | ~28 | staggers to up≈0.87, recovers cleanly |
+| 400 | ~108 | **knocked flat** (up→−0.3), stays down |
+
+Staying down at full tone leaves the body "paddling" (muscles chase the standing idle
+pose against the ground, ~85 stud/s churn) — that is the **missing Phase 3 DOWN state**,
+not a Phase 1 defect. A tone cycle (MT 0 → 1) rescues from ANY state back to a clean
+stand — verified from the paddling-flat state.
+
+**The impact reflex** (in `MuscleSystem`, CONFIG.IMPACT = threshold 25 / fallAt 55 /
+staggerTime 0.6 / uprightGate 0.7 / rearm 2.0): body-relative speed above threshold
+dips balance torque proportionally (zero at fallAt). Three rules learned the hard way:
+- threshold must clear recovery-motion noise (18 self-triggered; 25 with the ladder
+  above is clean),
+- **upright-gated**: a tilted/rising body must never re-dip itself,
+- **one dip per window (rearm)**: without a 2 s lockout it re-fires the instant the
+  body crosses back over the upright gate and it struggles at the boundary forever.
+
+**BalanceMaxTorque = 800** baked (stand is solid even at 300; raw-physics knockdowns
+exist at any value once the chain is heavy — the reflex just makes the fall threshold
+designable).
+
+**⚠ WORKFLOW LAW (cost half this session): `execute_luau` runs in a separate Luau VM
+from game scripts.** Module/CONFIG mutations from a command are placebo for the live
+loop; require() there builds a fresh module instance. Only instances/properties/
+attributes cross. All "live sweeps" of module values earlier this session were placebo —
+by luck, everything validated ran on the baked file values. Also: per-file sync can lag
+several seconds; `script_grep` a changed symbol before starting any play session (one
+stale-file session produced 30 minutes of false diagnosis).
+
+**Verdict:** kept — this is the Phase 1 solo configuration
+**Observing-client check:** NOT RUN — items 5–6 need the 2-client netsim session
+
+---

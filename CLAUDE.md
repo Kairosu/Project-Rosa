@@ -125,7 +125,16 @@ mirrors them into the place, both directions, near-instantly. Verified conventio
 (`start_stop_play`), `inspect_instance`, `search_game_tree`, console output, screen
 capture, `user_mouse_input` (UI clicks — use `instance_path`, screen coords are
 DPI-unreliable). **Use them.** Do not ask the user to verify something you can verify
-yourself. Known capability limits of `execute_luau` (verified): `Workspace.AuthorityMode`
+yourself.
+
+☠️ **`execute_luau` runs in a SEPARATE Luau VM from game scripts** (verified 14 JUL
+2026: a monkey-patched module function was never called by the live loop; a sentinel
+persisted only execute↔execute). `require` in an execute gets a *fresh module instance*
+— mutating module tables/CONFIG from an execute is a **placebo** for the running game.
+Only instances, properties, and attributes cross the boundary. Live-tune through those
+(the muscle attributes exist for exactly this); code changes go through the files +
+a play-session restart, and **always `script_grep` a changed symbol before starting
+play** — the session snapshots whatever the Edit DM has, and per-file sync can lag. Known capability limits of `execute_luau` (verified): `Workspace.AuthorityMode`
 and `StarterPlayer.AvatarJointUpgrade` are RobloxScript-protected — read AND write — in
 every DataModel. Those are Properties-panel-only; ask the user. It CAN write
 `CharacterControlMode`, `CharacterBreakJointsOnDeath`, create instances, and set
