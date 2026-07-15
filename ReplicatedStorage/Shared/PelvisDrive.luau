@@ -156,11 +156,15 @@ function PelvisDrive.step(character: Model, _dt: number)
 	local fs = character:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR)
 	local driveOK = fs == nil or fs == "upright" or fs == "stumble"
 
-	-- getup: support height climbs across the clip — crouch to stand
+	-- getup: support height climbs across the clip — BACK-LOADED (progress²)
+	-- so the body organizes low on the ground first and the visible rise
+	-- happens in the second half; a linear ramp levitated the pelvis while
+	-- the limbs were still gathering (part of the "rotate up" read)
 	local height = CONFIG.HEIGHT
 	if fs == "getup" then
 		local t = tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0
-		height = CONFIG.CROUCH + (CONFIG.HEIGHT - CONFIG.CROUCH) * GetupPose.progress(t)
+		local p = GetupPose.progress(t)
+		height = CONFIG.CROUCH + (CONFIG.HEIGHT - CONFIG.CROUCH) * p * p
 	end
 
 	local force = Vector3.zero

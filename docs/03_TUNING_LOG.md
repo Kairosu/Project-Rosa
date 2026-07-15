@@ -22,6 +22,27 @@ user feel pass + the 2-client Gate 3 run.**
   still dead, stairs unpolished, animations read confused during getup
   (ability system thinks it's falling — cosmetic).
 
+**Get-up LOOK pass (same day, user: "ragdoll → stiff limbs → we just rotate
+up — is that intended?"):** four changes, all aimed at the read:
+1. **Entry-pose capture**: the clip's first keyframe is now the CAPTURED
+   landed pose (physical relative attachment frames at GETUP entry — NOT
+   joint.Transform, which the Animator kept filling with idle while limp).
+   The sequence literally starts from the sprawl. Kills the snap.
+2. **Staggered keyframes** (CLIP_TIME 1.6): gather (0.35) → push (0.8) →
+   crouch (1.2) → stand; arms plant beside hips / under shoulders per
+   orientation before anything rises.
+3. **Scheduled tone in step()**: arms full from entry (they push), legs ease
+   in 15–50 % of the clip (0.45→1), spine 30–75 % (0.35→1) — the torso
+   UNFURLS instead of pivoting as a slab.
+4. **Back-loaded hover** (progress²): body organizes LOW first; the visible
+   rise happens in the clip's second half.
+Reliability after the pass: supine sometimes 1 attempt (4.6 s), otherwise
+2–3 attempts ≈ 8.3 s both orientations; buckle at RC 0.4 intact (never
+stands, recovers 1.7 s at RC 1); zero last-resort pivots this matrix.
+**The look-vs-reliability balance is now a FEEL CALL — user judges whether
+the struggle reads right or the knobs (tone curves, keys, hover curve) need
+another turn.**
+
 ---
 
 **As of 2026-07-15: Phase 0, 1, and 2 GATES PASSED. ARCHITECTURE PIVOTED.**

@@ -39,6 +39,7 @@ type Rig = {
 	faceUp: boolean,
 	wasGetup: boolean,
 	weight: number,
+	entryPose: GetupPose.Pose?,
 }
 local rigs: { [Model]: Rig } = setmetatable({}, { __mode = "k" }) :: any
 
@@ -110,9 +111,25 @@ function PoseDriver.step(character: Model, dt: number)
 		if not r.wasGetup then
 			r.wasGetup = true
 			r.faceUp = GetupPose.isFaceUp(pelvis) -- latched: no mid-clip flips
+			-- capture the ACTUAL landed pose as the clip's first keyframe.
+			-- NOT joint.Transform — the Animator kept writing idle into it
+			-- while the body lay limp; the physical truth is the relative
+			-- attachment frame.
+			local joints = MuscleSystem.getJoints(character)
+			local entry: GetupPose.Pose = {}
+			if joints then
+				for name, joint in joints do
+					local a0 = (joint :: any).Attachment0 :: Attachment?
+					local a1 = (joint :: any).Attachment1 :: Attachment?
+					if a0 and a1 then
+						entry[name] = a0.WorldCFrame:ToObjectSpace(a1.WorldCFrame)
+					end
+				end
+			end
+			r.entryPose = entry
 		end
 		local t = tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0
-		local pose = GetupPose.poseAt(r.faceUp, t, MuscleSystem.JOINTS)
+		local pose = GetupPose.poseAt(r.faceUp, t, MuscleSystem.JOINTS, r.entryPose)
 		if pose then
 			local joints = MuscleSystem.getJoints(character)
 			if joints then

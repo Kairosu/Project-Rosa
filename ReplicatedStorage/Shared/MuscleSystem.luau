@@ -9,6 +9,9 @@
 -- chars. 46 separate attributes bust the first; one big packed string busts the
 -- second. Per-joint triples fit both. Strings re-parse only when they change.
 
+-- GetupPose is dependency-free; MuscleSystem → GetupPose is the only edge
+local GetupPose = require(script.Parent:WaitForChild("GetupPose"))
+
 local CONFIG = {
 	MASTER_TONE_ATTR = "MT",
 	POWERED_ATTR = "Powered",
@@ -404,11 +407,25 @@ function MuscleSystem.step(character: Model)
 	local mt = tonumber(character:GetAttribute(CONFIG.MASTER_TONE_ATTR)) or 1
 	local values = MuscleSystem.getValues(character)
 	local wantKinematic = not powered
-	-- STUMBLE (Phase 3): the LEGS go soft while the dip lasts — knees buckle,
-	-- the body scrambles. Arms stay at tone (they're busy flailing).
-	local legTone = 1
-	if character:GetAttribute(CONFIG.STATE_ATTR) == "stumble" then
-		legTone = math.max(MuscleSystem.impactFactor(character), CONFIG.STUMBLE_LEG_FLOOR)
+	-- per-group tone factors, driven by the state machine:
+	-- STUMBLE: the LEGS go soft while the dip lasts — knees buckle, the body
+	-- scrambles. Arms stay at tone (they're busy flailing).
+	-- GETUP: effort is SCHEDULED — arms full from the start (they plant and
+	-- push), legs power in through the middle (they take the load), the spine
+	-- firms last (the torso UNFURLS instead of pivoting up as one stiff
+	-- slab — user feedback: "pure stiff limbs, we just rotate up").
+	local legF, armF, spineF = 1, 1, 1
+	local state = character:GetAttribute(CONFIG.STATE_ATTR)
+	if state == "stumble" then
+		legF = math.max(MuscleSystem.impactFactor(character), CONFIG.STUMBLE_LEG_FLOOR)
+	elseif state == "getup" then
+		local p = GetupPose.progress(tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0)
+		local function ease(from: number, to: number): number
+			local x = math.clamp((p - from) / math.max(to - from, 1e-3), 0, 1)
+			return x * x * (3 - 2 * x)
+		end
+		legF = 0.45 + 0.55 * ease(0.15, 0.5)
+		spineF = 0.35 + 0.65 * ease(0.3, 0.75)
 	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any
@@ -419,8 +436,12 @@ function MuscleSystem.step(character: Model)
 		if powered then
 			local v = values[name]
 			local jointTone = mt
-			if legTone < 1 and (name:find("Hip") or name:find("Knee") or name:find("Ankle")) then
-				jointTone *= legTone
+			if name:find("Hip") or name:find("Knee") or name:find("Ankle") then
+				jointTone *= legF
+			elseif name:find("Shoulder") or name:find("Elbow") or name:find("Wrist") then
+				jointTone *= armF
+			else
+				jointTone *= spineF
 			end
 			-- tone scales strength linearly and the CEILING quadratically: a
 			-- weak muscle tracks slower AND loses force disproportionately
