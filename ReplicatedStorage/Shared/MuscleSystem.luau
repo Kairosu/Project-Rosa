@@ -12,6 +12,9 @@
 local CONFIG = {
 	MASTER_TONE_ATTR = "MT",
 	POWERED_ATTR = "Powered",
+	-- balance ceiling as a live attribute (Gate 2: lowering it must measurably ease
+	-- knockdowns). Falls back to BALANCE_TORQUE when unseeded.
+	BALANCE_ATTR = "BT",
 	JOINT_ATTR_PREFIX = "MJ_",
 	-- master tone below this releases CCL balance so the body can actually heap
 	COLLAPSE_BALANCE_THRESHOLD = 0.1,
@@ -28,18 +31,49 @@ local CONFIG = {
 	-- rearm: after any firing the reflex is locked out until the window fully expires
 	-- (stagger + rearm) — without it, crossing back over the upright gate while still
 	-- moving fast re-triggers the dip and the body struggles at the boundary forever.
-	IMPACT = { threshold = 25, fallAt = 55, staggerTime = 0.6, uprightGate = 0.7, rearm = 2.0 },
-	-- the capsule brakes instantly by default (AccelerationTime 0); the heavy body
-	-- keeps its momentum and whips forward-then-back on every stop (user feedback).
-	-- A little capsule smoothing removes most of the whip.
+	IMPACT = {
+		threshold = 25, fallAt = 55, staggerTime = 0.6, uprightGate = 0.7, rearm = 2.0,
+		-- self-motion gates: a fast 180° turn swings the body around the capsule at
+		-- up to ~53 stud/s relative (measured live — far MORE than a hard crate
+		-- hit), and the swing PEAKS just after the turn ends, exactly when the
+		-- instantaneous gates re-open. So: while turning hard the channel is deaf,
+		-- and it STAYS deaf for turnCooldown afterwards. The speed-EMA gate covers
+		-- straight-line launch/brake transients the same way.
+		selfOmega = 3, selfAccel = 250, selfSpeedDelta = 10, turnCooldown = 0.4,
+		-- a dip this deep is a KNOCKDOWN: the server triggers the fall reflex
+		-- (tone crash → crumple → limp → rise). Balance dip alone can NEVER
+		-- topple the capsule on a wall hit — the Root socket absorbs the body's
+		-- momentum and the wall blocks the tip (verified live at 41 stud/s,
+		-- balance 55: capsule stood like a statue). Readability comes from tone.
+		knockdownFactor = 0.3,
+	},
+	-- wall channel: a wall hit stops the CAPSULE, and the body stops with it —
+	-- body-rel speed stays near zero, so the impact reflex above never sees it
+	-- (verified live: sprint into wall = 26→0 in one step, up=1.00, no reaction).
+	-- The signal is horizontal capsule deceleration: ~1500 stud/s² on a wall hit
+	-- vs ~130 for a DecelerationTime-smoothed stop. Dip severity scales with the
+	-- speed thrown away: walking into a wall (16) is nothing, sprinting (25.6) is
+	-- a real stagger.
+	-- speedFallAt 26: a full sprint (25.6) into a wall drops balance to ~zero —
+	-- the wall blocks a forward TIP, so the readable reaction is the body
+	-- crumpling against it and the fall reflex taking over. A jog (~19) is a
+	-- bobble, a walk (16) is nothing.
+	WALL = { accelMin = 400, speedMin = 18, speedFallAt = 26 },
+	-- the capsule brakes/launches instantly by default; the heavy body keeps its
+	-- momentum and whips on every transition (user feedback). Symmetric smoothing
+	-- removes the whip AND keeps normal stops out of the wall channel.
 	ACCEL_TIME = 0.2,
+	DECEL_TIME = 0.2,
 	-- fall reflex (Phase 3 seed): a body that is going down goes LIMP — tone slews
 	-- toward `tone` while tilted past `tiltUp`, held for `downTime`, then restores
 	-- (which is also what lifts him back up). This is what makes falls ragdoll.
 	-- riseBoost: balance is multiplied while getting up (set via the "Rising"
 	-- attribute) — without it the rise half-completes, topples, re-limps, forever.
 	-- riseHold: must stay upright this long before the fall trigger re-arms.
-	FALL = { tiltUp = 0.55, tone = 0.15, downTime = 1.6, riseUp = 0.85, riseHold = 0.5, riseBoost = 4 },
+	-- tone 0.08, deliberately BELOW COLLAPSE_BALANCE_THRESHOLD (0.1): during the
+	-- limp window the capsule must give up too, or an upright knockdown (wall
+	-- crash) leaves him slumped-but-standing at balance 120 (verified live)
+	FALL = { tiltUp = 0.55, tone = 0.08, downTime = 1.6, riseUp = 0.85, riseHold = 0.5, riseBoost = 4 },
 	RISING_ATTR = "Rising",
 	-- per-joint driver defaults {strength, damping, torque}. Baseline = AJU factory
 	-- values (tuning log 2026-07-14). Root-ward joints get extra damping per the official
@@ -108,7 +142,7 @@ function MuscleSystem.fieldKey(joint: string, field: string): string
 end
 
 function MuscleSystem.isValidAttr(key: string): boolean
-	if key == CONFIG.MASTER_TONE_ATTR then
+	if key == CONFIG.MASTER_TONE_ATTR or key == CONFIG.BALANCE_ATTR then
 		return true
 	end
 	local joint, field = key:match("^M_(%a+)_([sdt])$")
@@ -118,6 +152,9 @@ end
 function MuscleSystem.clampAttr(key: string, value: number): number
 	if key == CONFIG.MASTER_TONE_ATTR then
 		return math.clamp(value, 0, 1)
+	end
+	if key == CONFIG.BALANCE_ATTR then
+		return math.clamp(value, 0, 20000)
 	end
 	local lim = CONFIG.LIMITS[key:sub(-1)]
 	return math.clamp(value, lim[1], lim[2])
@@ -195,6 +232,9 @@ function MuscleSystem.ensureDefaults(character: Model)
 	if character:GetAttribute(CONFIG.MASTER_TONE_ATTR) == nil then
 		character:SetAttribute(CONFIG.MASTER_TONE_ATTR, 1)
 	end
+	if character:GetAttribute(CONFIG.BALANCE_ATTR) == nil then
+		character:SetAttribute(CONFIG.BALANCE_ATTR, CONFIG.BALANCE_TORQUE)
+	end
 	for _, j in MuscleSystem.JOINTS do
 		local attr = MuscleSystem.jointAttr(j)
 		if character:GetAttribute(attr) == nil then
@@ -205,8 +245,8 @@ end
 
 -- server, inside sim: land one validated+clamped debug write
 function MuscleSystem.applyDebugWrite(character: Model, key: string, value: number)
-	if key == CONFIG.MASTER_TONE_ATTR then
-		character:SetAttribute(CONFIG.MASTER_TONE_ATTR, value)
+	if key == CONFIG.MASTER_TONE_ATTR or key == CONFIG.BALANCE_ATTR then
+		character:SetAttribute(key, value)
 		return
 	end
 	local joint, field = key:match("^M_(%a+)_([sdt])$")
@@ -281,14 +321,18 @@ function MuscleSystem.setupBody(character: Model): boolean
 			end
 		end
 	end
+	-- the ControllerManager can arrive AFTER the joints (verified live: a session
+	-- latched setupDone with AccelerationTime still 0). Not done until it's here.
 	local cm = character:FindFirstChildOfClass("ControllerManager")
 	local gc = cm and cm:FindFirstChildWhichIsA("GroundController", true)
-	if gc then
-		pcall(function()
-			(gc :: any).AccelerationTime = CONFIG.ACCEL_TIME
-		end)
+	if not gc then
+		return false
 	end
-	return true
+	local ok = pcall(function()
+		(gc :: any).AccelerationTime = CONFIG.ACCEL_TIME;
+		(gc :: any).DecelerationTime = CONFIG.DECEL_TIME
+	end)
+	return ok
 end
 
 -- CCL balance follows tone, always compliant (never rigid — see setupBody note).
@@ -314,7 +358,8 @@ function MuscleSystem.updateBalance(character: Model)
 			if character:GetAttribute(CONFIG.RISING_ATTR) == true then
 				factor *= CONFIG.FALL.riseBoost
 			end
-			g.BalanceMaxTorque = CONFIG.BALANCE_TORQUE * factor
+			local base = tonumber(character:GetAttribute(CONFIG.BALANCE_ATTR)) or CONFIG.BALANCE_TORQUE
+			g.BalanceMaxTorque = base * factor
 		end
 	end)
 	MuscleSystem.lastBalanceError = if ok then nil else tostring(err)
@@ -345,6 +390,9 @@ end
 
 -- impact reflex state, per character per peer
 local impactState: { [Model]: { factor: number, timer: number } } = setmetatable({}, { __mode = "k" }) :: any
+local lastHVel: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
+local slowSpeed: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local turnDeaf: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 
 function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 	local st = impactState[character]
@@ -355,17 +403,57 @@ function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 			st = nil
 		end
 	end
+	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not hrp then
+		return
+	end
+	local v = hrp.AssemblyLinearVelocity
+	local hVel = Vector3.new(v.X, 0, v.Z)
+	local prev = lastHVel[character]
+	lastHVel[character] = hVel
+	local hAccel = if prev then (hVel - prev).Magnitude / math.max(dt, 1e-4) else 0
+	local hSpeed = hVel.Magnitude
+	local slow = slowSpeed[character]
+	if slow == nil then
+		slow = hSpeed
+	end
+	slow += (hSpeed - slow) * math.min(dt / 0.5, 1)
+	slowSpeed[character] = slow
+
 	local imp = CONFIG.IMPACT
-	if peakRel > imp.threshold then
-		-- only a STANDING body can be knocked off balance; while tilted or rising the
-		-- reflex stays silent so it cannot sabotage its own recovery
-		local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		if not hrp or hrp.CFrame.UpVector.Y < imp.uprightGate then
-			return
-		end
-		if st then
-			return -- active or re-arming: one dip per window, never a chain
-		end
+	-- only a STANDING body can be knocked off balance; while tilted or rising the
+	-- reflex stays silent so it cannot sabotage its own recovery
+	if hrp.CFrame.UpVector.Y < imp.uprightGate then
+		return
+	end
+
+	-- wall channel: violent horizontal capsule stop while moving fast (measured:
+	-- ~1250 stud/s² in one step on a sprint-wall hit vs ~130 for a smoothed stop).
+	-- A wall hit is a fresh physical event — it OVERRIDES any active dip window,
+	-- otherwise a launch-transient dip's rearm swallows the real impact.
+	local wall = CONFIG.WALL
+	local preSpeed = if prev then prev.Magnitude else 0
+	if hAccel > wall.accelMin and preSpeed > wall.speedMin then
+		local factor = math.clamp(1 - (preSpeed - wall.speedMin) / (wall.speedFallAt - wall.speedMin), 0, 1)
+		impactState[character] = { factor = factor, timer = imp.staggerTime + imp.rearm }
+		return
+	end
+
+	if st then
+		return -- active or re-arming: one dip per window, never a chain
+	end
+
+	-- body-rel channel: external hits, deaf during self-motion transients
+	local omegaY = math.abs(hrp.AssemblyAngularVelocity.Y)
+	local deaf = turnDeaf[character] or 0
+	deaf = if omegaY >= imp.selfOmega then imp.turnCooldown else math.max(deaf - dt, 0)
+	turnDeaf[character] = deaf
+	if
+		peakRel > imp.threshold
+		and deaf <= 0
+		and hAccel < imp.selfAccel
+		and math.abs(hSpeed - slow) < imp.selfSpeedDelta
+	then
 		local factor = math.clamp(1 - (peakRel - imp.threshold) / (imp.fallAt - imp.threshold), 0, 1)
 		impactState[character] = { factor = factor, timer = imp.staggerTime + imp.rearm }
 	end
@@ -387,3 +475,4 @@ function MuscleSystem.guard(character: Model): string?
 end
 
 return MuscleSystem
+

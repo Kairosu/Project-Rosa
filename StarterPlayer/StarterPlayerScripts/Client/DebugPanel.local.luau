@@ -30,6 +30,7 @@ end)
 
 local jointStates: { [string]: { [string]: any } } = {}
 local masterState = Iris.State(1)
+local balanceState = Iris.State(MuscleSystem.CONFIG.BALANCE_TORQUE)
 local lastPowered = false
 
 local function attrOr(char: Model, attr: string, fallback: number): number
@@ -54,6 +55,7 @@ local function reread(char: Model?)
 	table.clear(jointStates)
 	if char then
 		masterState:set(attrOr(char, MuscleSystem.CONFIG.MASTER_TONE_ATTR, 1))
+		balanceState:set(attrOr(char, MuscleSystem.CONFIG.BALANCE_ATTR, MuscleSystem.CONFIG.BALANCE_TORQUE))
 	end
 end
 
@@ -83,10 +85,13 @@ Iris:Connect(function()
 	end
 	lastPowered = powered
 
+	local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local vel = if hrp then hrp.AssemblyLinearVelocity else Vector3.zero
 	Iris.Text({
-		("joints: %d/15   powered: %s   recv: %.1f KB/s   frame: %.1f ms"):format(
+		("joints: %d/15   powered: %s   speed: %.1f   recv: %.1f KB/s   frame: %.1f ms"):format(
 			jointCount,
 			tostring(powered),
+			Vector3.new(vel.X, 0, vel.Z).Magnitude,
 			(Stats :: any).DataReceiveKbps or 0,
 			frameMs
 		),
@@ -111,6 +116,12 @@ Iris:Connect(function()
 		remote:FireServer(MuscleSystem.CONFIG.MASTER_TONE_ATTR, 1)
 	end
 	Iris.End()
+
+	-- Gate 2 knob: lower it, get knocked over easier
+	local balance = Iris.SliderNum({ "BalanceTorque", 10, 0, 5000 }, { number = balanceState })
+	if balance.numberChanged() then
+		remote:FireServer(MuscleSystem.CONFIG.BALANCE_ATTR, balanceState:get())
+	end
 
 	if Iris.Button({ "Re-read values" }).clicked() then
 		reread(char)

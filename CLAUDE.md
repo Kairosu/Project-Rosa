@@ -134,7 +134,16 @@ persisted only execute↔execute). `require` in an execute gets a *fresh module 
 Only instances, properties, and attributes cross the boundary. Live-tune through those
 (the muscle attributes exist for exactly this); code changes go through the files +
 a play-session restart, and **always `script_grep` a changed symbol before starting
-play** — the session snapshots whatever the Edit DM has, and per-file sync can lag. Known capability limits of `execute_luau` (verified): `Workspace.AuthorityMode`
+play** — the session snapshots whatever the Edit DM has, and per-file sync can lag.
+**File sync PAUSES while Studio is in Play mode** (verified): edits made mid-play reach
+the Edit DM only after stopping — stop play, edit, grep-verify, then restart; a grep
+during play checks the stale snapshot and lies. Two more live-testing laws (details in
+tuning log, Phase 2 session 1): **never create custom InputAction/InputContext
+instances** (they can wedge SA input sync for the whole session — keybinds go through
+UserInputService), and **`user_keyboard_input` works for ONE burst per play session**
+(flush keyUps first; stuck keys leak across sessions; `character_navigation` and
+scripted `MoveAction:Fire()` do not work under CCL/SA — don't drive the character with
+them). Known capability limits of `execute_luau` (verified): `Workspace.AuthorityMode`
 and `StarterPlayer.AvatarJointUpgrade` are RobloxScript-protected — read AND write — in
 every DataModel. Those are Properties-panel-only; ask the user. It CAN write
 `CharacterControlMode`, `CharacterBreakJointsOnDeath`, create instances, and set

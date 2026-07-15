@@ -2,22 +2,28 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
-**As of 2026-07-14, Phase 2 begun:**
-- **Phase 0: GATE PASSED.**
-- **Phase 1: GATE PASSED** — 2-client netsim run (150 ms + jitter + 2 % loss,
-  SA Visualizer on) user-verified 2026-07-14: observing client reads stand /
-  collapse / rise / shove cleanly; nothing buggy or broken reported.
-- **Two items carried to the Gate 2 netsim run** (same test conditions):
-  1. numeric receive rate (KB/s — the debug panel shows it live; note it down),
-  2. whether `list_roblox_studios` can see test-server/client instances
-     (open question from 04_PREFLIGHT §2).
-- **Phase 2 (balance & locomotion) IN PROGRESS.** Already in place from Phase 1:
-  ControllerManager wiring, BalanceRigidityEnabled=false, BalanceMaxTorque driven
-  from tone (`updateBalance`). New work: run/sprint, wall-stumble check, stairs,
-  live balance-torque knob.
-- All code lives in the repo (file sync); commits pushed to GitHub main.
-- Read the two ☠️ workflow laws in CLAUDE.md § THE ENVIRONMENT before touching
-  anything: execute_luau VM isolation, and sync-verify (`script_grep`) before play.
+**As of 2026-07-14, end of Phase 2 session 1:**
+- **Phase 0: GATE PASSED. Phase 1: GATE PASSED** (2-client netsim, user-verified).
+- **Phase 2 build COMPLETE, solo-verified.** Sprint (LeftShift, 16→25.5 measured),
+  wall-crash knockdown (sprint→wall = tone crash→limp→rise, full cycle in server
+  telemetry), live BT balance knob + panel slider, DecelerationTime, void reset,
+  setupBody race fix. Stock Animate module handles walk/run clips under SA
+  (Animation Graph beta not needed — evaluated, skipped).
+- **User playtest items for Gate 2** (feel checks, minutes of play):
+  1. Sprint feel (hold LeftShift) — speed + anim look.
+  2. Sprint into the SprintWall — should read as a crash: crumple limp against
+     the wall, ~1.6 s down, one committed rise. (Capsule stays planted — the
+     full slide-down-the-wall needs Phase 3's DOWN state; known, logged.)
+  3. Walk up/down the stairs — watch for jitter.
+  4. Walk-stop feel (DecelerationTime 0→0.2 is new since the last feel pass).
+- **Then the Gate 2 netsim run** (2 players, 150 ms + jitter + 2 % loss):
+  observing-client readability of all of the above, **numeric recv KB/s**
+  (carried from Gate 1 — note it from the panel), and check whether
+  `list_roblox_studios` sees test-server/client instances (04_PREFLIGHT §2).
+- Read the ☠️ workflow laws in CLAUDE.md § THE ENVIRONMENT before touching
+  anything, plus the **MCP live-testing laws** in the Phase 2 session-1 entry
+  below (custom IAS instances wedge input sync; one keyboard burst per play
+  session; file sync pauses during Play mode).
 
 ---
 
@@ -73,13 +79,16 @@ much as knowing that `0.6` works.
 > max |v| ≈ 1.4–5.7 across all parts including idle sway. UpperTorso density 1.0.
 > Torque raises to 50k root-ward were tested and are NOT needed for standing.
 
-## BALANCE (GroundController)
+## BALANCE & CAPSULE (GroundController)
 
 | Property | Value | Notes |
 |---|---|---|
-| BalanceMaxTorque | 2000 × masterTone | 10000 and 2000 equally stable. Even 2000 is unknockable while chain mass is 1.8 — knockdown sweep pending (see change log) |
+| BalanceMaxTorque | BT attr (default 800) × tone × impactFactor (× riseBoost 4 while Rising) | BT is live-tunable (panel slider, remote-validated 0–20000). Ladder: impulse 250 → min up 0.91 @ 800 / 0.82 @ 250 / 0.81 @ 100 (saturates — socket decouples) |
 | BalanceSpeed | 100 (stock) | untouched so far |
 | BalanceRigidityEnabled | `false` | non-negotiable — CONFIRMED live: rigid balance + powered body = perpetual flail (hard reaction impulses through the Root socket) |
+| AccelerationTime | 0.2 | stop/launch whip fix (session 3) |
+| DecelerationTime | 0.2 | symmetric smoothing (Phase 2); also keeps normal stops under the wall channel's 400 stud/s² |
+| Sprint | Running.SpeedMultiplier = 1.6 → 25.5 stud/s | server-only writer; ability applies it via MoveSpeedFactor |
 
 ## MUSCLE MODIFIERS
 
@@ -280,5 +289,99 @@ into the Gate 2 netsim run, which uses identical conditions.
 **Verdict:** GATE 1 CLOSED. The Phase 1 configuration (joint table + densities +
 reflexes above) is the frozen baseline. Phase 2 begins.
 **Observing-client check:** PASS
+
+---
+
+## 2026-07-14 — Phase 2 (session 1) — sprint, wall crash, balance knob
+
+### What shipped
+- **Sprint** (`Shared/Locomotion.luau`): LeftShift → walk 16 → **25.5 measured**.
+  Mechanism: the AvatarAbilities **Running ability's `SpeedMultiplier` attribute**
+  (Configuration under `character.AbilityManagerActor.Abilities.Running`), which
+  the ability applies via `GroundController.MoveSpeedFactor`. Never touch
+  WalkSpeed/BaseMoveSpeed. SPRINT_MULT = 1.6.
+- **Sprint intent path**: client reads `UserInputService:IsKeyDown` (plain,
+  local), fires the MuscleDebug remote on change; **the server is the ONLY
+  writer of SpeedMultiplier**, inside the sim.
+- **Wall-crash knockdown**: `noteImpact` gained a **wall channel** — horizontal
+  capsule decel (>400 stud/s², measured ~1250 on a sprint-wall hit vs ~130 for a
+  smoothed stop) with severity from pre-impact speed (WALL = accelMin 400,
+  speedMin 18, speedFallAt 26). A dip below **knockdownFactor 0.3** makes
+  MuscleServer trigger the fall reflex: tone crash → limp → one boosted rise.
+  Verified in server telemetry: hit at 25.6 → MT 1→0.08 → bal 0 → down 1.6 s →
+  Rising → stand. Walk-into-wall (16) triggers nothing.
+- **FALL.tone 0.15 → 0.08** — must sit BELOW COLLAPSE_BALANCE_THRESHOLD (0.1) or
+  an upright knockdown leaves him slumped-but-standing at bal 120 (verified).
+- **Body-rel reflex self-motion gates**: a 180° turn swings the body up to
+  **~53 stud/s relative** (more than any crate hit) and the swing peaks AFTER
+  the turn ends. Gates: turnCooldown 0.4 s after |ωy| ≥ 3, hAccel < 250,
+  |speed − 0.5 s-EMA| < 10. Without these the launch dip's rearm swallowed the
+  real wall impact.
+- **DecelerationTime 0 → 0.2** (matches AccelerationTime; new since the user's
+  last feel pass) — removes residual stop-whip AND keeps normal stops out of
+  the wall channel.
+- **BT attribute** (default 800, remote-validated, panel slider): impulse-250
+  ladder → min up **0.91 @ BT 800, 0.82 @ BT 250, 0.81 @ BT 100** — measurably
+  deeper stagger, saturating below ~250 because the Root socket decouples body
+  hits from the capsule (Phase 1 discovery). The DESIGNED fall boundary lives in
+  the impact reflex + knockdownFactor, not raw BT.
+- **setupBody race fix**: the ControllerManager can arrive AFTER the joints —
+  a session latched setupDone with AccelerationTime still 0. setupBody now
+  returns false until the GroundController is configured.
+- **VOID_Y = −50 reset** in MuscleServer (a runaway walked off the world and
+  fell forever at y = −500).
+- Locomotion clips: **stock Animate module** (RunAnimate.Server/.Client pair,
+  SA-aware) already blends walk/run into Transform. Animation Graph beta not
+  needed for Gate 2.
+
+### ☠️ ENGINE FACTS learned (Server Authority, verified live)
+1. **Custom InputAction state does NOT sync client→server** — not even read
+   inside the server's BindToSimulation. Only the engine's own input pipeline
+   rides the sim timeline. Custom binary intent goes over a validated remote.
+2. **Custom InputAction/InputContext instances near the stock input tree can
+   WEDGE the engine's input sync for the whole session** — server receives
+   MovingDirection (0,0,0) forever while the client walks in place (rubber-band
+   pin). Also: a foreign action inside the stock CharacterContext makes the
+   AvatarAbilities mapper spam "Unknown action" every frame. **Do not create
+   IAS instances** until Roblox documents support. Keybinds via
+   UserInputService.
+3. **Writing the Running SpeedMultiplier from BOTH peers compounds it**
+   (16 → 41 stud/s measured): under SA the writes land as separate
+   attribute-change events and the ability multiplies on each. One writer only.
+4. Ability system: stock abilities are Configurations (Climbing, Running,
+   Jumping, …) under `AbilityManagerActor.Abilities`; `Running.SpeedMultiplier`
+   + `SyncedState` child; AbilityAction1–10 exist pre-bound in the runtime
+   PlayerModule's `Player.InputContexts.CharacterContext`.
+
+### ☠️ MCP LIVE-TESTING LAWS (cost most of this session — respect them)
+- **`character_navigation` does not work under CCL** (rides Humanoid:MoveTo,
+  which CCL dropped). Returns "Success", moves nothing.
+- **Scripted `MoveAction:Fire()` is unreliable**: the first fire in a session
+  may reach the server; later fires (including zeroing!) may not — one runaway
+  walked off the world. Do not drive the character with Fire().
+- **Real key injection (`user_keyboard_input`) works — ONE burst per play
+  session.** Later bursts silently die (input channel/viewport focus). Compose
+  everything (flush keyUps first! stuck keys leak across sessions) into a
+  single call's action list. Never run an execute in parallel with keyboard
+  input (focus flip kills it).
+- **Telemetry pattern**: arm a background `task.spawn` sampler (writes to a
+  StringValue) BEFORE the keyboard burst; read it after. `execute_luau` can
+  RETURN values directly — use that instead of print/console (console output
+  is shared, spammy, and truncates).
+- **File sync PAUSES while Studio is in Play mode** — `script_grep` verifies
+  only in Edit mode. Stop play before editing + verifying. (A stale-file
+  session this way produced the 41-stud/s ghost.)
+
+### Open / deferred
+- Wall crash: capsule stays planted against the wall during the limp (hover +
+  wall prop it up; balance 0 alone cannot tip a static upright capsule —
+  verified at bal 0 for 0.9 s). The body goes limp and reads as a crash; the
+  full slide-down-the-wall release is **Phase 3's DOWN state** (controller
+  release), not Phase 2 tuning.
+- Stairs + all feel checks: user playtest (self-serve keyboard choreography is
+  too fragile to be worth more MCP cycles).
+
+**Verdict:** kept — pending user feel pass + Gate 2 netsim run
+**Observing-client check:** NOT RUN — the Gate 2 items
 
 ---

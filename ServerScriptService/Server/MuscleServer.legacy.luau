@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local MuscleSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MuscleSystem"))
+local Locomotion = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Locomotion"))
 
 -- body parts must never appear in the root's FloorSensor ray (see MuscleSystem.setupBody)
 pcall(function()
@@ -23,6 +24,7 @@ local CONFIG = {
 	RESET_RELOCK_STEPS = 45, -- kinematic relock window after a guard reset
 	RESET_HEIGHT = 6,
 	RESET_STILL_SPEED = 5, -- don't re-power until every part is at least this still
+	VOID_Y = -50, -- below the room = lost; reset instead of falling forever
 	-- tone slews instead of stepping: snapping full muscle onto a displaced body is a
 	-- slingshot (verified live — 539 stud/s off a 2.7-stud Root stretch)
 	MT_RAMP_PER_SECOND = 1.5,
@@ -43,6 +45,7 @@ type CharState = {
 	fallArmed: boolean, -- re-arms only after standing again, else lying re-triggers forever
 	upHold: number, -- continuous seconds spent upright
 	setupDone: boolean,
+	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
 }
 local charStates: { [Player]: CharState } = {}
 local pending: { { player: Player, key: string, value: number } } = {}
@@ -52,6 +55,10 @@ local pending: { { player: Player, key: string, value: number } } = {}
 -- timeline (the official SA custom-state pattern).
 remote.OnServerEvent:Connect(function(player, key: unknown, value: unknown)
 	if type(key) ~= "string" or type(value) ~= "number" or value ~= value then
+		return
+	end
+	if key == Locomotion.CONFIG.REMOTE_KEY then
+		table.insert(pending, { player = player, key = key, value = if value == 1 then 1 else 0 })
 		return
 	end
 	if not MuscleSystem.isValidAttr(key) then
@@ -72,6 +79,7 @@ local function onCharacter(player: Player, character: Model)
 		fallArmed = true,
 		upHold = 0,
 		setupDone = false,
+		sprint = false,
 	}
 end
 
@@ -97,7 +105,9 @@ local function simStep(_dt: number)
 	for _, w in pending do
 		local st = charStates[w.player]
 		if st and st.character.Parent then
-			if w.key == MuscleSystem.CONFIG.MASTER_TONE_ATTR then
+			if w.key == Locomotion.CONFIG.REMOTE_KEY then
+				st.sprint = w.value == 1
+			elseif w.key == MuscleSystem.CONFIG.MASTER_TONE_ATTR then
 				st.userMt = w.value -- slewed below, never stepped
 			else
 				MuscleSystem.applyDebugWrite(st.character, w.key, w.value)
@@ -173,9 +183,13 @@ local function simStep(_dt: number)
 				st.fallArmed = true
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
 			end
+			-- going down by TILT, or knocked down by a hard impact (wall crash /
+			-- massive hit): a deep reflex dip means the body cannot stay up — the
+			-- readable reaction is the tone crash, not the balance dip
+			local knockedDown = MuscleSystem.impactFactor(character) < MuscleSystem.CONFIG.IMPACT.knockdownFactor
 			if
 				st.fallArmed
-				and upY < FALL.tiltUp
+				and (upY < FALL.tiltUp or knockedDown)
 				and st.settle == 0
 				and st.resetLock == 0
 				and character:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true
@@ -196,6 +210,9 @@ local function simStep(_dt: number)
 
 		local offender, peakRel = MuscleSystem.scanBody(character)
 		MuscleSystem.noteImpact(character, peakRel, if type(_dt) == "number" then _dt else 1 / 60)
+		if not offender and hrp and hrp.Position.Y < CONFIG.VOID_Y then
+			offender = "below void plane"
+		end
 		if st.settle == 0 and st.resetLock == 0 then
 			if offender then
 				warn("[MuscleServer] stability guard: " .. offender .. " — resetting " .. player.Name)
@@ -211,6 +228,7 @@ local function simStep(_dt: number)
 			end
 		end
 
+		Locomotion.apply(character, st.sprint)
 		MuscleSystem.step(character)
 		MuscleSystem.updateBalance(character)
 	end
