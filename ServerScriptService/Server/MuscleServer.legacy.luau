@@ -226,9 +226,14 @@ local function simStep(_dt: number)
 			-- trip detector: the capsule is orientation-locked by balance and
 			-- NEVER tips in a trip — the BODY folds over the obstacle while
 			-- the hips hang from a gyroscope. Torso divergence is the truth.
+			-- contact-gated: a trip means the body FOLDED OVER SOMETHING —
+			-- sprint strafes whip the torso hard with nothing nearby
+			-- (rel ~70 measured) and must never read as trips
 			local torso = character:FindFirstChild("UpperTorso") :: BasePart?
 			local torsoUp = if torso then torso.CFrame.UpVector.Y else 1
-			st.torsoHold = if torsoUp < FALL.torsoDiverge then st.torsoHold + dtStep else 0
+			st.torsoHold = if torsoUp < FALL.torsoDiverge and MuscleSystem.recentContact(character)
+				then st.torsoHold + dtStep
+				else 0
 			st.downHold = if upY < FALL.tiltUp and character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) ~= true
 				then st.downHold + dtStep
 				else 0
@@ -246,6 +251,15 @@ local function simStep(_dt: number)
 				st.downHold = 0
 				st.torsoHold = 0
 				st.fallTimer = FALL.downTime
+				-- the hips must FALL WITH the body, not from hover-zero: the
+				-- capsule's vertical velocity starts at ~0 while the body is
+				-- already going down, and that one-gravity-lag reads as an
+				-- onset pin. Hand it the pelvis's downward velocity.
+				local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
+				if hrp and pelvis then
+					local hv = hrp.AssemblyLinearVelocity
+					hrp.AssemblyLinearVelocity = Vector3.new(hv.X, math.min(pelvis.AssemblyLinearVelocity.Y, 0), hv.Z)
+				end
 			end
 		end
 		st.mtTarget = if st.fallTimer > 0 then math.min(st.userMt, FALL.tone) else st.userMt

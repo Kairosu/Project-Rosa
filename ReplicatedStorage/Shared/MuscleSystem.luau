@@ -43,6 +43,20 @@ local CONFIG = {
 		-- and it STAYS deaf for turnCooldown afterwards. The speed-EMA gate covers
 		-- straight-line launch/brake transients the same way.
 		selfOmega = 3, selfAccel = 250, selfSpeedDelta = 10, turnCooldown = 0.4,
+		-- animated limb swing scales with ground speed: a sprint foot-plant
+		-- whip hits rel ~40 LEGITIMATELY (the dip escalation unmasked it —
+		-- random falls while running, user-reported). The hit line rides the
+		-- swing envelope; severity width stays constant so real hits map the
+		-- same. Sprint 25.5 → line at ~42.9, observed sprint peak 40.7.
+		swingPerSpeed = 0.7,
+		-- ☠️ measured: sprint STRAFES whip the body to rel ~70 — no threshold
+		-- can separate self-motion from hits at speed. Structural gate
+		-- instead: the body-rel channel (and the trip detector) may only fire
+		-- within contactWindow of a FOREIGN touch on a non-leg body part.
+		-- External falls require external contact; open-field sprinting is
+		-- immune BY CONSTRUCTION. Walls (capsule decel) and true capsule tilt
+		-- remain contact-free evidence.
+		contactWindow = 0.5,
 		-- fully deaf while Rising and for riseGrace after: the get-up swings body
 		-- parts far past every threshold, and a reflex that fires on the recovery
 		-- knocks the body straight back down (verified live — rise→fall loop)
@@ -119,7 +133,7 @@ local CONFIG = {
 		-- the human is falling, whatever the capsule thinks. Walk/sprint
 		-- torso pitch stays above ~0.9; stop-whips are shorter than
 		-- torsoTime.
-		torsoDiverge = 0.55, torsoTime = 0.15,
+		torsoDiverge = 0.55, torsoTime = 0.1,
 		-- stranded catch-all: a body down this long triggers the fall cycle
 		-- regardless of arming. NO reachable state may lie powered on the
 		-- ground — the frozen pin (lying at full tone, disarmed, forever) the
@@ -570,6 +584,38 @@ local lastHVel: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
 local slowSpeed: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 local turnDeaf: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
 local riseGrace: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local touchArm: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local touchWired: { [Model]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
+-- feet and shins touch the world constantly (ground, stairs); everything else
+-- touching something foreign is evidence of an actual event
+local TOUCH_EXCLUDE: { [string]: boolean } = {
+	LeftFoot = true, RightFoot = true, LeftLowerLeg = true, RightLowerLeg = true,
+	HumanoidRootPart = true,
+}
+
+local function ensureTouchArming(character: Model)
+	if touchWired[character] then
+		return
+	end
+	touchWired[character] = true
+	for _, p in character:GetChildren() do
+		if p:IsA("BasePart") and not TOUCH_EXCLUDE[p.Name] then
+			p.Touched:Connect(function(other)
+				if other and not other:IsDescendantOf(character) then
+					touchArm[character] = os.clock()
+				end
+			end)
+		end
+	end
+end
+
+-- both peers: has a non-leg body part touched something foreign recently?
+function MuscleSystem.recentContact(character: Model): boolean
+	ensureTouchArming(character)
+	local t = touchArm[character]
+	return t ~= nil and os.clock() - t < CONFIG.IMPACT.contactWindow
+end
 
 function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 	local st = impactState[character]
@@ -629,13 +675,15 @@ function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 	local deaf = turnDeaf[character] or 0
 	deaf = if omegaY >= imp.selfOmega then imp.turnCooldown else math.max(deaf - dt, 0)
 	turnDeaf[character] = deaf
+	local swingBase = imp.threshold + hSpeed * imp.swingPerSpeed
 	if
-		peakRel > imp.threshold
+		peakRel > swingBase
+		and MuscleSystem.recentContact(character)
 		and deaf <= 0
 		and hAccel < imp.selfAccel
 		and math.abs(hSpeed - slow) < imp.selfSpeedDelta
 	then
-		local factor = math.clamp(1 - (peakRel - imp.threshold) / (imp.fallAt - imp.threshold), 0, 1)
+		local factor = math.clamp(1 - (peakRel - swingBase) / (imp.fallAt - imp.threshold), 0, 1)
 		if not st then
 			impactState[character] = { factor = factor, timer = imp.staggerTime + imp.rearm }
 		elseif st.timer > imp.rearm and factor < st.factor then
