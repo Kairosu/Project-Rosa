@@ -2,19 +2,20 @@
 
 ## ⚡ CURRENT STATUS (update at every session end)
 
-**As of 2026-07-14, end of Phase 1 session 3:**
-- **Phase 0: GATE PASSED** (solo items; 2-client sanity ran together with Phase 1 work).
-- **Phase 1: all solo criteria pass.** Stands 5 min (soak: worst 1.41 stud/s, zero
-  drift), collapses limp, recovers, proportional shove response (hold / stagger /
-  ragdoll fall+rise). Falls are limp via the fall reflex; arms softened; stop-whip
-  fixed — **all three user-feel-confirmed.**
-- **Gate 1 OPEN on items 5–6 only:** observing-client readability + receive rate.
-  Needs the user to run Test → Clients and Servers → 2 Players, netsim 150 ms +
-  jitter + 2 % loss, SA Visualizer on. During that session, check whether
-  `list_roblox_studios` can see the test-server/client instances (open question from
-  04_PREFLIGHT §2). **User should publish the place at gate-pass.**
-- Next phase after that: **Phase 2 (balance & locomotion).**
-- All code lives in the repo (file sync); 4 commits pushed to GitHub main.
+**As of 2026-07-14, Phase 2 begun:**
+- **Phase 0: GATE PASSED.**
+- **Phase 1: GATE PASSED** — 2-client netsim run (150 ms + jitter + 2 % loss,
+  SA Visualizer on) user-verified 2026-07-14: observing client reads stand /
+  collapse / rise / shove cleanly; nothing buggy or broken reported.
+- **Two items carried to the Gate 2 netsim run** (same test conditions):
+  1. numeric receive rate (KB/s — the debug panel shows it live; note it down),
+  2. whether `list_roblox_studios` can see test-server/client instances
+     (open question from 04_PREFLIGHT §2).
+- **Phase 2 (balance & locomotion) IN PROGRESS.** Already in place from Phase 1:
+  ControllerManager wiring, BalanceRigidityEnabled=false, BalanceMaxTorque driven
+  from tone (`updateBalance`). New work: run/sprint, wall-stumble check, stairs,
+  live balance-torque knob.
+- All code lives in the repo (file sync); commits pushed to GitHub main.
 - Read the two ☠️ workflow laws in CLAUDE.md § THE ENVIRONMENT before touching
   anything: execute_luau VM isolation, and sync-verify (`script_grep`) before play.
 
@@ -264,5 +265,20 @@ stop. Feel verdict pending user playtest.
 
 **Verdict:** kept — user feel-checked all three ("looks good to go", 2026-07-14)
 **Observing-client check:** NOT RUN — still the open Gate 1 item
+
+---
+
+## 2026-07-14 — Phase 1 — ✅ GATE 1 PASSED (2-client netsim run)
+
+**Conditions:** Test → Clients and Servers → 2 Players, netsim 150 ms + jitter +
+2 % packet loss, SA Visualizer on.
+**Result:** user-verified — the observing client reads stand / collapse / rise /
+shove response cleanly. Nothing buggy or broken reported.
+**Carried (not silently dropped):** the numeric recv KB/s was not noted during the
+run, and the `list_roblox_studios` multi-instance question went unchecked. Both roll
+into the Gate 2 netsim run, which uses identical conditions.
+**Verdict:** GATE 1 CLOSED. The Phase 1 configuration (joint table + densities +
+reflexes above) is the frozen baseline. Phase 2 begins.
+**Observing-client check:** PASS
 
 ---
