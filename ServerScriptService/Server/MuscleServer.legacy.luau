@@ -45,6 +45,7 @@ type CharState = {
 	fallArmed: boolean, -- re-arms only after standing again, else lying re-triggers forever
 	upHold: number, -- continuous seconds spent upright
 	downHold: number, -- continuous seconds spent DOWN outside the fall cycle (stranded)
+	torsoHold: number, -- continuous seconds the torso has left the pose (trip detector)
 	riseTimer: number, -- watchdog: a rise that never reaches upright retries the fall cycle
 	setupDone: boolean,
 	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
@@ -81,6 +82,7 @@ local function onCharacter(player: Player, character: Model)
 		fallArmed = true,
 		upHold = 0,
 		downHold = 0,
+		torsoHold = 0,
 		riseTimer = 0,
 		setupDone = false,
 		sprint = false,
@@ -178,6 +180,7 @@ local function simStep(_dt: number)
 			st.fallTimer -= dtStep
 			st.upHold = 0
 			st.downHold = 0
+			st.torsoHold = 0
 			if st.fallTimer <= 0 then
 				-- limp period over: right the capsule (it fell with the body and
 				-- cannot right itself — see getUpAssist), then one boosted rise
@@ -216,17 +219,32 @@ local function simStep(_dt: number)
 			-- catch-all (down > strandedDown at full power = the frozen pin
 			-- the recorder caught — force the cycle, whatever the state)
 			local knockedDown = MuscleSystem.impactFactor(character) < MuscleSystem.CONFIG.IMPACT.knockdownFactor
+			-- committed topple: tilted AND rotating over fast — release NOW
+			-- instead of letting balance fight the fall to the 49° line
+			local wv = if hrp then hrp.AssemblyAngularVelocity else Vector3.zero
+			local toppling = upY < FALL.tipUp and Vector3.new(wv.X, 0, wv.Z).Magnitude > FALL.tipRate
+			-- trip detector: the capsule is orientation-locked by balance and
+			-- NEVER tips in a trip — the BODY folds over the obstacle while
+			-- the hips hang from a gyroscope. Torso divergence is the truth.
+			local torso = character:FindFirstChild("UpperTorso") :: BasePart?
+			local torsoUp = if torso then torso.CFrame.UpVector.Y else 1
+			st.torsoHold = if torsoUp < FALL.torsoDiverge then st.torsoHold + dtStep else 0
 			st.downHold = if upY < FALL.tiltUp and character:GetAttribute(MuscleSystem.CONFIG.RISING_ATTR) ~= true
 				then st.downHold + dtStep
 				else 0
 			if
-				((st.fallArmed and upY < FALL.tiltUp) or knockedDown or st.downHold >= FALL.strandedDown)
+				(
+					(st.fallArmed and (upY < FALL.tiltUp or toppling or st.torsoHold >= FALL.torsoTime))
+					or knockedDown
+					or st.downHold >= FALL.strandedDown
+				)
 				and st.settle == 0
 				and st.resetLock == 0
 				and character:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true
 			then
 				st.fallArmed = false
 				st.downHold = 0
+				st.torsoHold = 0
 				st.fallTimer = FALL.downTime
 			end
 		end

@@ -104,6 +104,22 @@ local CONFIG = {
 		-- riseRamp 4: at 6 the legs snap to full power while the feet catch the
 		-- ground and the rise becomes an 8-stud hop (verified live)
 		riseBoost = 4, riseRamp = 4, riseTimeout = 2.0, retryDown = 0.8,
+		-- committed-topple trigger: tilted past tipUp AND tipping faster than
+		-- tipRate (rad/s, horizontal axes) = it is going over NOW. Both gates
+		-- together cannot false-fire on AccelerationLean or normal wobble.
+		-- NOTE: under balance the capsule is orientation-LOCKED (verified: a
+		-- driven 2 rad/s spin for 1.5 s left up at 1.00) — so this only
+		-- catches capsules that physically lose the lock (sensor lost, etc).
+		tipUp = 0.9, tipRate = 1.5,
+		-- torso-divergence trigger — THE trip detector. In a real trip the
+		-- capsule never tips (see above); the BODY folds over the obstacle
+		-- while the hips hang from a gyroscope, and the reflex only noticed
+		-- ~0.5 s later (user-reported "pins then falls"). Torso up-vector
+		-- below torsoDiverge for torsoTime = the muscles have lost the pose;
+		-- the human is falling, whatever the capsule thinks. Walk/sprint
+		-- torso pitch stays above ~0.9; stop-whips are shorter than
+		-- torsoTime.
+		torsoDiverge = 0.55, torsoTime = 0.15,
 		-- stranded catch-all: a body down this long triggers the fall cycle
 		-- regardless of arming. NO reachable state may lie powered on the
 		-- ground — the frozen pin (lying at full tone, disarmed, forever) the

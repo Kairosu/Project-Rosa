@@ -588,6 +588,29 @@ releases were never enough; the pin was collision GEOMETRY, not forces.
   crate. The DOWN state is now a true free ragdoll — an architecture-
   independent property any future locomotion system also needs.
 
+**Addendum 5 (same day) — THE 0.5 s ONSET PIN: the capsule never tips.**
+User: "still pins ~0.5 s then falls like normal ragdoll." Instrumented
+discovery that rewrites the fall model: **under balance the capsule is
+orientation-LOCKED** — a driven 2 rad/s spin sustained for 1.5 s left
+up=1.00 (the balance servo cancels rotation within each step; it is a
+gyroscope, not a spring). Consequences:
+- The tilt trigger (upY < 0.65) can barely ever fire in a real trip — the
+  capsule does not tip; the BODY folds over the obstacle while the hips
+  hang from the locked capsule. The ~0.5 s pin was the body-rel reflex
+  slowly noticing what the tilt path never would.
+- **Torso-divergence trigger** (the trip detector): armed AND
+  `UpperTorso.UpVector.Y < torsoDiverge (0.55)` sustained `torsoTime
+  (0.15 s)` → fall. The body's pose is the truth; the capsule's tilt is
+  propaganda. Walk/sprint torso pitch stays > ~0.9; stop-whips are shorter
+  than torsoTime.
+- Also added committed-topple trigger (tipUp 0.9 + tipRate 1.5 rad/s
+  horizontal) for capsules that physically lose the lock (sensor lost) —
+  verified it cannot false-fire from nudges (w=1.0 → recovered, no fall).
+- Verified trip emulation (sustained 30 stud/s forward fold on torso+head):
+  fold start → release **0.135 s** (was ~0.5 s+ user-felt); capsule up was
+  still 0.75 at release — the old path would still have been waiting.
+  Clean recovery to stand afterwards (FS=up, MT 1.0).
+
 **Verdict:** kept — awaiting user feel pass (turn feel is user-tunable now via
 the TurnSpeed slider; report the value that feels right)
 **Observing-client check:** NOT RUN — Gate 2 items
