@@ -1,150 +1,156 @@
 --!strict
--- Gate 0 debug panel: enumerates every joint on the local character and reads/writes
--- muscle properties live. 15 AnimationConstraints expected; any Motor6D means AJU is off.
+-- Phase 1 debug panel. Presentation only — it READS joint state freely, but every WRITE
+-- goes through the MuscleDebug remote so the server lands it on the simulation timeline.
+-- Never writes joint properties directly: under Server Authority that's a lie the
+-- rollback would immediately un-tell.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
 
-local Iris = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Iris")) :: any
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Iris = require(Shared:WaitForChild("Iris")) :: any
+local MuscleSystem = require(Shared:WaitForChild("MuscleSystem"))
 
 local CONFIG = {
-	STRENGTH_MAX = 2, -- Roblox warns >1 may destabilize; slider allows probing anyway
-	DAMPING_MAX = 4, -- root joints need > critical per official anti-oscillation recipe
-	TORQUE_LOG_MAX = 7, -- MaxTorque slider is log10: 1 → 1e7
+	STRENGTH_MAX = 2, -- phase spec range; Roblox warns >1 can destabilize
+	DAMPING_MAX = 4,
+	TORQUE_LOG_MAX = 7,
 }
 
+local remote = ReplicatedStorage:WaitForChild("MuscleDebug") :: RemoteEvent
 local player = Players.LocalPlayer
 
-local joints: { Instance } = {}
-local motor6DCount = 0
-local dirty = true
+-- rolling frame-time (gate metric, presentation-side)
+local frameMs = 0
+RunService.RenderStepped:Connect(function(dt)
+	frameMs = frameMs * 0.95 + (dt * 1000) * 0.05
+end)
 
--- Iris states per joint, created lazily so respawns/rescans stay cheap
-local stateCache: { [Instance]: { [string]: any } } = {}
+local jointStates: { [string]: { [string]: any } } = {}
+local masterState = Iris.State(1)
+local lastPowered = false
 
-local function rescan(char: Model?)
-	table.clear(joints)
-	table.clear(stateCache)
-	motor6DCount = 0
-	if not char then
-		return
-	end
-	for _, d in char:GetDescendants() do
-		if d:IsA("AnimationConstraint") then
-			table.insert(joints, d)
-		elseif d:IsA("Motor6D") then
-			motor6DCount += 1
-			table.insert(joints, d)
-		end
-	end
-	table.sort(joints, function(a, b)
-		return a.Name < b.Name
-	end)
+local function attrOr(char: Model, attr: string, fallback: number): number
+	return tonumber(char:GetAttribute(attr)) or fallback
 end
 
-local function watchCharacter(char: Model)
-	dirty = true
-	-- joints stream in during appearance load; coalesce rescans to one per frame
-	char.DescendantAdded:Connect(function()
-		dirty = true
-	end)
-	char.DescendantRemoving:Connect(function()
-		dirty = true
-	end)
-end
-
-player.CharacterAdded:Connect(watchCharacter)
-if player.Character then
-	watchCharacter(player.Character)
-end
-
-local function statesFor(j: Instance): { [string]: any }
-	local s = stateCache[j]
+local function statesFor(char: Model, joint: string): { [string]: any }
+	local s = jointStates[joint]
 	if not s then
-		local a = j :: any
-		local torque = tonumber(a.MaxTorque) or 0
+		local v = MuscleSystem.getValues(char)[joint]
 		s = {
-			kin = Iris.State(a.IsKinematic == true),
-			strength = Iris.State(tonumber(a.AngularStrength) or 0),
-			damping = Iris.State(tonumber(a.AngularDamping) or 0),
-			torqueLog = Iris.State(math.clamp(math.log10(math.max(torque, 1)), 0, CONFIG.TORQUE_LOG_MAX)),
+			strength = Iris.State(v[1]),
+			damping = Iris.State(v[2]),
+			torqueLog = Iris.State(math.clamp(math.log10(math.max(v[3], 1)), 0, CONFIG.TORQUE_LOG_MAX)),
 		}
-		stateCache[j] = s
+		jointStates[joint] = s
 	end
 	return s
 end
 
+local function reread(char: Model?)
+	table.clear(jointStates)
+	if char then
+		masterState:set(attrOr(char, MuscleSystem.CONFIG.MASTER_TONE_ATTR, 1))
+	end
+end
+
+player.CharacterAdded:Connect(function()
+	table.clear(jointStates)
+end)
+
 Iris.Init()
 
 Iris:Connect(function()
-	if dirty then
-		dirty = false
-		rescan(player.Character)
-	end
+	local char = player.Character
 
-	Iris.Window({ "Body · Joints (Gate 0)" })
+	Iris.Window({ "Body · Muscle (Phase 1)" })
 
-	local acCount = #joints - motor6DCount
-	Iris.Text({ ("AnimationConstraints: %d   Motor6D: %d"):format(acCount, motor6DCount) })
-	if motor6DCount > 0 then
-		Iris.Text({ "!! Motor6D present — AvatarJointUpgrade is OFF" })
-	elseif acCount == 15 then
-		Iris.Text({ "OK: 15/15 AnimationConstraints — AJU active" })
-	elseif acCount == 0 then
+	if not char then
 		Iris.Text({ "waiting for character..." })
+		Iris.End()
+		return
 	end
 
-	if Iris.Button({ "Re-read values from joints" }).clicked() then
-		table.clear(stateCache)
+	local joints, jointCount = MuscleSystem.getJoints(char)
+	local powered = char:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true
+
+	-- attributes are seeded server-side after spawn; snap states to truth when they land
+	if powered and not lastPowered then
+		reread(char)
+	end
+	lastPowered = powered
+
+	Iris.Text({
+		("joints: %d/15   powered: %s   recv: %.1f KB/s   frame: %.1f ms"):format(
+			jointCount,
+			tostring(powered),
+			(Stats :: any).DataReceiveKbps or 0,
+			frameMs
+		),
+	})
+	if MuscleSystem.lastBalanceError then
+		Iris.Text({ "!! balance hook error: " .. tostring(MuscleSystem.lastBalanceError) })
 	end
 
-	for _, j in joints do
-		Iris.Tree({ j.Name })
-		Iris.Text({ j.ClassName })
+	Iris.SeparatorText({ "master tone" })
 
-		if j:IsA("AnimationConstraint") then
-			local a = j :: any
-			local s = statesFor(j)
+	local master = Iris.SliderNum({ "MasterTone", 0.01, 0, 1 }, { number = masterState })
+	if master.numberChanged() then
+		remote:FireServer(MuscleSystem.CONFIG.MASTER_TONE_ATTR, masterState:get())
+	end
+	Iris.SameLine()
+	if Iris.Button({ "Collapse (tone 0)" }).clicked() then
+		masterState:set(0)
+		remote:FireServer(MuscleSystem.CONFIG.MASTER_TONE_ATTR, 0)
+	end
+	if Iris.Button({ "Restore (tone 1)" }).clicked() then
+		masterState:set(1)
+		remote:FireServer(MuscleSystem.CONFIG.MASTER_TONE_ATTR, 1)
+	end
+	Iris.End()
 
-			local cb = Iris.Checkbox({ "IsKinematic" }, { isChecked = s.kin })
-			if cb.checked() or cb.unchecked() then
-				a.IsKinematic = s.kin:get()
-			end
+	if Iris.Button({ "Re-read values" }).clicked() then
+		reread(char)
+	end
 
-			local strength = Iris.SliderNum(
-				{ "AngularStrength", 0.01, 0, CONFIG.STRENGTH_MAX },
-				{ number = s.strength }
-			)
+	Iris.SeparatorText({ "joints (root-out order)" })
+
+	for _, name in MuscleSystem.JOINTS do
+		local joint = joints and joints[name]
+		Iris.Tree({ name })
+		if joint then
+			local s = statesFor(char, name)
+
+			local strength = Iris.SliderNum({ "AngularStrength", 0.01, 0, CONFIG.STRENGTH_MAX }, { number = s.strength })
 			if strength.numberChanged() then
-				a.AngularStrength = s.strength:get()
+				remote:FireServer(MuscleSystem.fieldKey(name, "s"), s.strength:get())
 			end
 
-			local damping = Iris.SliderNum(
-				{ "AngularDamping", 0.01, 0, CONFIG.DAMPING_MAX },
-				{ number = s.damping }
-			)
+			local damping = Iris.SliderNum({ "AngularDamping", 0.01, 0, CONFIG.DAMPING_MAX }, { number = s.damping })
 			if damping.numberChanged() then
-				a.AngularDamping = s.damping:get()
+				remote:FireServer(MuscleSystem.fieldKey(name, "d"), s.damping:get())
 			end
 
-			local torque = Iris.SliderNum(
-				{ "MaxTorque (log10)", 0.05, 0, CONFIG.TORQUE_LOG_MAX },
-				{ number = s.torqueLog }
-			)
+			local torque = Iris.SliderNum({ "MaxTorque (log10)", 0.05, 0, CONFIG.TORQUE_LOG_MAX }, { number = s.torqueLog })
 			if torque.numberChanged() then
-				a.MaxTorque = 10 ^ s.torqueLog:get()
+				remote:FireServer(MuscleSystem.fieldKey(name, "t"), 10 ^ s.torqueLog:get())
 			end
 
+			local a = joint :: any
 			Iris.Text({
-				("live: kin=%s str=%.2f damp=%.2f torque=%s"):format(
+				("live: kin=%s str=%.2f damp=%.2f torque=%.0f"):format(
 					tostring(a.IsKinematic),
 					tonumber(a.AngularStrength) or -1,
 					tonumber(a.AngularDamping) or -1,
-					tostring(a.MaxTorque)
+					tonumber(a.MaxTorque) or -1
 				),
 			})
+		else
+			Iris.Text({ "missing" })
 		end
-
 		Iris.End()
 	end
 
