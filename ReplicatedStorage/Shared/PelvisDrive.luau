@@ -46,6 +46,11 @@ local CONFIG = {
 	-- health-capped ramp genuinely buckle (Gate 3 item 3: at RC 0.4 with
 	-- boost, clip + 40% legs still stood — verified live, twice).
 	RISE_BOOST = 1,
+	-- upright-TORQUE-only rise assist (a rising human actively rights the
+	-- hips — spine work we don't model joint-wise). Torque only, never
+	-- support: boosting support would re-mask the RC buckle and break the
+	-- stand-on-him pin (both live in the vertical force margin).
+	RISE_UP_BOOST = 2,
 	-- getup support height: the pelvis is pulled from crouch height to stand
 	-- height ACROSS the clip, so the body rises through the sequence instead
 	-- of popping to full hover
@@ -213,8 +218,9 @@ function PelvisDrive.step(character: Model, dt: number)
 	-- STUMBLE dips it with the impact factor — a hit genuinely wobbles the
 	-- body now (this is the pelvis-mode half of the stagger system)
 	local dip = math.max(MuscleSystem.impactFactor(character), MuscleSystem.CONFIG.IMPACT.knockdownFactor)
+	local upB = if rising then CONFIG.RISE_UP_BOOST else 1
 	local up = pelvis.CFrame.UpVector
-	local torque = (up:Cross(Vector3.yAxis) * CONFIG.UP_K * boost * dip - Vector3.new(w.X, 0, w.Z) * CONFIG.UP_D) * m
+	local torque = (up:Cross(Vector3.yAxis) * CONFIG.UP_K * boost * upB * dip - Vector3.new(w.X, 0, w.Z) * CONFIG.UP_D) * m
 	local mh = Vector3.new(move.X, 0, move.Z)
 	if driveOK and mh.Magnitude > 0.1 then
 		local look = pelvis.CFrame.LookVector
@@ -226,7 +232,7 @@ function PelvisDrive.step(character: Model, dt: number)
 			torque += Vector3.new(0, ang * CONFIG.YAW_K - w.Y * CONFIG.YAW_D, 0) * m
 		end
 	end
-	local tcap = m * CONFIG.UP_CAP * mt * boost
+	local tcap = m * CONFIG.UP_CAP * mt * boost * upB
 	if torque.Magnitude > tcap then
 		torque = torque.Unit * tcap
 	end

@@ -20,8 +20,10 @@
 
 local CONFIG = {
 	-- total rise length; everything schedules against this. 1.6 crowded the
-	-- IK phases (bridge/downward-dog reads + retries — user report, Add. 9 v2)
-	CLIP_TIME = 2.0,
+	-- IK phases (bridge/downward-dog reads + retries — user report, Add. 9 v2);
+	-- 2.0 still read as popping up ("feels like jumping" — user report): the
+	-- whole climb lived in the last ~0.6 s. 2.4 gives the push a full second.
+	CLIP_TIME = 2.4,
 	TIME_ATTR = "GT",
 	FACE_ATTR = "GF",
 	AXIS_ATTR = "GA",

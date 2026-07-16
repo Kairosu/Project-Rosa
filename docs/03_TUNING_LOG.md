@@ -1007,3 +1007,65 @@ ACTOR-SCREEN (client) whip 18.2 % (was 34.7 %), one 3.5-stud correction
 spike remains. minUpAfterDone 0.98 — posture rock-solid through the judged
 window. Console clean. Residual client whip is SA correction noise — that is
 the deferred post-gate netsim smoothing pass, not these mechanisms.
+
+## ADDENDUM 12 — 15 JUL (night): "jumping up" + residual spasm — the stock recover ability was the jump
+
+**User report:** "Limbs still kind of spasm and we get up really quick, feels
+more like we're jumping up." Instrumented autopsy (states + tracks + pelvis
+height profile per getup):
+
+**THE JUMP MECHANISM (caught live):** the platform's stock recover ability
+owns a ~3 s FallingDown→GettingUp timer that runs from the KNOCKDOWN — it
+fires GettingUp→Running at ~GT 1.4, MID-getup, and the SA animate module
+starts walk/run/idle tracks. Every joint snaps toward the locomotion pose at
+near-full tone while the feet are still planted: pelvis 1.89→3.59 in 0.3 s,
+0.76 studs ABOVE standing height, peakVy 10.5. The rise was never our hover
+curve — the curve was irrelevant once the pose snapped to standing.
+
+**Dead ends measured before the fix (do not retry):**
+- ChangeState wars are UNWINNABLE: per-step forcing of Physics flapped
+  Physics↔FallingDown every single step (the ability manager re-asserts on
+  its own rollback clock) and ADDED track-restart strobing. Removed.
+- Disabling the FallingDown ability kills the FALL itself: the capsule never
+  releases, a knocked-down body hangs at pelvisY 2.8 (its activation — not
+  our StandForce/balance zeroing — is what actually releases the capsule
+  under SA). It must STAY enabled.
+- NoLocomotion ability (Active=true sticks when the server writes it) gates
+  movement only — idle track kept playing at weight 1. Not an anim switch.
+
+**THE FIX SET (all four required):**
+1. **GettingUp ability disabled** (SyncedState Enabled=false, server, once
+   per character in MuscleServer): the recover timer can never flip the
+   state mid-getup. Verified: zero locomotion tracks during down/getup
+   (only the Freefall "fall" clip during the tumble). Our existing
+   upright/stumble block already forces Running back after the stand.
+2. With tracks dead the rise went HONEST and stalled at ~50° (3 straight
+   watchdog fails): nothing told the body to STAND — joints strove toward
+   the stale pre-fall pose (Transform writes are client-placebo, ENGINE
+   FACTS §1). **GetupHead IK** (5th control, LowerTorso→Head = Waist+Neck,
+   PoseDriver): head target climbs from a curled lean to standing head
+   height (HEAD_H 1.6→4.35, ease 0.25–0.95, lean 0.5 toward the stand
+   direction — which is MINUS the lying head-ward axis for face-up bodies).
+   Standing intent through the one legal cross-peer channel; weight rides
+   the foot schedule.
+3. **PelvisDrive RISE_UP_BOOST 2** — upright-TORQUE-only rise assist.
+   Never boost support: the RC buckle and the stand-on-him pin both live in
+   the vertical force margin.
+4. **Root muscle neutralized during getup (rootF 0.15, MuscleSystem)**: the
+   ghost HRP lies where it fell until AFTER the rise, so Root strove toward
+   a stale pose relative to a tumbled frame at the tone² ceiling and fought
+   the pelvis spring — the intermittent stalls (3/10 retries measured with
+   fixes 1–3 only). Retro-explains the old "success": the mid-clip Running
+   restart re-righted the capsule and the ROOT MUSCLE yanked the body up in
+   0.2 s — the jump WAS the Root muscle. The pelvis belongs to the
+   spring + hover during a rise.
+5. Feel: CLIP_TIME 2.0→2.4 (riseTimeout 2.6→3.0 keeps the 0.6 s grace),
+   GETUP_WEIGHT_RATE 6→3.5 (plant engage read as the body gathering, not a
+   yank — hands whipped 1.0–1.6 studs/frame at GT 0.1–0.3 at rate 6),
+   GETUP_SMOOTH 0.1→0.15.
+
+**Verification state:** fixes 1–3 measured live (tracks NONE, heights track
+the hover curve with no overshoot, server whip 4.3%); fix 4 (rootF) synced
+and play-tested but the MCP bridge dropped mid-battery — final retry-rate and
+client-whip numbers pending next session. If retries persist, next levers:
+RISE_UP_BOOST 2→3, rootF 0.15→0.05, head-IK lean up.

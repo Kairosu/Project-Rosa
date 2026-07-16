@@ -54,6 +54,7 @@ type CharState = {
 	lowHold: number, -- continuous seconds under tiltUp after clipDone (fail persistence)
 	riseFails: number, -- consecutive failed physical get-ups (3 = loud last-resort assist)
 	setupDone: boolean,
+	abilityLock: boolean, -- GettingUp ability disabled (see simStep)
 	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
 }
 local charStates: { [Player]: CharState } = {}
@@ -94,6 +95,7 @@ local function onCharacter(player: Player, character: Model)
 		lowHold = 0,
 		riseFails = 0,
 		setupDone = false,
+		abilityLock = false,
 		sprint = false,
 	}
 end
@@ -147,6 +149,29 @@ local function simStep(_dt: number)
 
 		if not st.setupDone then
 			st.setupDone = MuscleSystem.setupBody(character)
+		end
+
+		-- ☠️ the stock recover ability owns a ~3 s FallingDown→GettingUp timer
+		-- that fires MID-getup and flips the state to Running — the animate
+		-- module then plays walk/run/idle and every joint snaps toward the
+		-- locomotion pose at rising tone: the body launches off its planted
+		-- feet ("jumping up", user report; pelvis overshot stand height 0.76,
+		-- peakVy 10.5, caught live). ChangeState wars are unwinnable (the
+		-- manager re-asserts every step — verified, a per-step Physics force
+		-- just flapped). The sanctioned switch is the ability's SyncedState.
+		-- GettingUp only: FallingDown must STAY enabled — its activation is
+		-- what actually releases the capsule (disabling it left the capsule
+		-- standing through a knockdown, body hanging at pelvisY 2.8, verified).
+		-- Our own state machine already forces Running back once upright.
+		if not st.abilityLock then
+			local mgr = character:FindFirstChild("AbilityManagerActor")
+			local ab = mgr and mgr:FindFirstChild("Abilities")
+			local gu = ab and ab:FindFirstChild("GettingUp")
+			local ss = gu and gu:FindFirstChild("SyncedState")
+			if ss then
+				ss:SetAttribute("Enabled", false)
+				st.abilityLock = true
+			end
 		end
 
 		if st.settle > 0 then
@@ -434,6 +459,7 @@ local function simStep(_dt: number)
 					hs == Enum.HumanoidStateType.FallingDown
 					or hs == Enum.HumanoidStateType.GettingUp
 					or hs == Enum.HumanoidStateType.Ragdoll
+					or hs == Enum.HumanoidStateType.Physics
 				then
 					task.defer(function()
 						if character.Parent and character:GetAttribute(MuscleSystem.CONFIG.STATE_ATTR) == fs then

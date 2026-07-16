@@ -127,9 +127,9 @@ local CONFIG = {
 		-- ceilings and full-tone rises needed 3 attempts (verified). At 3 the
 		-- muscles are full by 0.33 s and the clip does the rest. riseTimeout
 		-- must stay longer than GetupPose.CONFIG.CLIP_TIME.
-		-- riseTimeout tracks CLIP_TIME (2.0 since the IK v2 pass): 0.6 s of
+		-- riseTimeout tracks CLIP_TIME (2.4 since the jump-read fix): 0.6 s of
 		-- post-clip grace before posture judges the attempt
-		riseBoost = 4, riseRamp = 3, riseTimeout = 2.6, retryDown = 0.8,
+		riseBoost = 4, riseRamp = 3, riseTimeout = 3.0, retryDown = 0.8,
 		-- failHold: the clipDone fast-fail needs upY under tiltUp for this long
 		-- CONTINUOUSLY. It was a single-frame read, and one rocked frame during
 		-- the judged window (a plant handoff, a ground contact) scrapped a rise
@@ -423,7 +423,7 @@ function MuscleSystem.step(character: Model)
 	-- push), legs power in through the middle (they take the load), the spine
 	-- firms last (the torso UNFURLS instead of pivoting up as one stiff
 	-- slab — user feedback: "pure stiff limbs, we just rotate up").
-	local legF, armF, spineF = 1, 1, 1
+	local legF, armF, spineF, rootF = 1, 1, 1, 1
 	local state = character:GetAttribute(CONFIG.STATE_ATTR)
 	if state == "stumble" then
 		legF = math.max(MuscleSystem.impactFactor(character), CONFIG.STUMBLE_LEG_FLOOR)
@@ -443,6 +443,15 @@ function MuscleSystem.step(character: Model)
 		-- arriving before the clip ends, the final straighten snapped to the
 		-- idle pose — the tail of the "quick get into place" read
 		spineF = 0.35 + 0.65 * ease(0.35, 0.9)
+		-- ☠️ the ROOT muscle (ghost-HRP→pelvis) has GARBAGE intent during a
+		-- getup: the capsule lies wherever it fell (it rights only AFTER the
+		-- rise) so Root strives toward a stale pose relative to a tumbled
+		-- frame at the full tone² ceiling — and FIGHTS the pelvis upright
+		-- spring. Intermittent ~50° stalls, 3/10 retries (measured; the old
+		-- mid-clip track restart masked this — Running re-righted the capsule
+		-- and Root yanked the body up in 0.2 s: that WAS the "jump"). The
+		-- pelvis belongs to the spring + hover during the rise.
+		rootF = 0.15
 	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any
@@ -453,7 +462,9 @@ function MuscleSystem.step(character: Model)
 		if powered then
 			local v = values[name]
 			local jointTone = mt
-			if name:find("Hip") or name:find("Knee") or name:find("Ankle") then
+			if name == "Root" then
+				jointTone *= rootF * spineF
+			elseif name:find("Hip") or name:find("Knee") or name:find("Ankle") then
 				jointTone *= legF
 			elseif name:find("Shoulder") or name:find("Elbow") or name:find("Wrist") then
 				jointTone *= armF

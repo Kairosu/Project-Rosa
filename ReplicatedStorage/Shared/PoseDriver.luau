@@ -40,14 +40,18 @@ local CONFIG = {
 	-- getup IK choreography (ground-anchored, keyed off the lying body's
 	-- HEAD-WARD axis — the pelvis UP vector projected flat; the look vector
 	-- points into/out of the ground on a lying body and lies about facing)
-	GETUP_WEIGHT_RATE = 6, -- weight ramp per second INTO a plant
+	-- engage 3.5: at 6 the plants yanked sprawled arms into place in ~0.17 s —
+	-- hands whipped 1.0-1.6 studs/FRAME at GT 0.1-0.3 (measured; the IK weight
+	-- blend is joint-space, so small weight steps arc the hand a long way).
+	-- Slower engage reads as the body gathering itself.
+	GETUP_WEIGHT_RATE = 3.5,
 	-- release is SLOWER than engage — a push hands off, it doesn't let go. The
 	-- old want-multiplication zeroed a plant's weight in ONE frame at its
 	-- off-mark, and that jolt landed inside the watchdog's judgment window: a
 	-- rocked pelvis under the fail line read as "collapses and retries"
 	GETUP_RELEASE_RATE = 3,
 	GETUP_LIFT = 0.12, -- target height above the ground hit
-	GETUP_SMOOTH = 0.1,
+	GETUP_SMOOTH = 0.15, -- 0.1 chased SA corrections too eagerly (limb jitter)
 	GETUP_RAY = 6,
 	-- FACE-UP (sit-up → squat): hands just behind the hips, feet TUCKED
 	-- under the body — v1 planted the feet AHEAD, and pelvis-rise over
@@ -71,6 +75,18 @@ local CONFIG = {
 	FEET_UNDER_START = 0.65,
 	FEET_UNDER_END = 0.95,
 	GETUP_FEET_OFF = 0.97,
+	-- standing intent for the SPINE (needed once the stock GettingUp ability
+	-- was disabled): with no tracks playing and Transform writes client-
+	-- placebo, nothing told the torso to be UPRIGHT — joints strove toward
+	-- the stale pre-fall pose and fought the pelvis spring to a stall at
+	-- ~50° tilt (3 straight watchdog fails, measured). A head-target IK
+	-- (LowerTorso→Head: solves Waist+Neck) is the same legal cross-peer
+	-- channel as the plants: the head climbs from a curled position to
+	-- standing height and the spine unfurls to follow it.
+	HEAD_H_FROM = 1.6, -- head height above ground early in the clip (curled)
+	HEAD_H_TO = 4.35, -- standing R15 head height
+	HEAD_RISE_FROM = 0.25, HEAD_RISE_TO = 0.95,
+	HEAD_LEAN = 0.5, -- early curl toward the direction the body will face
 }
 
 local PoseDriver = {}
@@ -179,7 +195,7 @@ local function ensureFlail(character: Model, r: Rig)
 end
 
 local function ensureGetupIK(character: Model, r: Rig): boolean
-	if r.gIK and #r.gIK == 4 then
+	if r.gIK and #r.gIK == 5 then
 		local alive = true
 		for _, ik in r.gIK do
 			if not ik.Parent then
@@ -199,9 +215,10 @@ local function ensureGetupIK(character: Model, r: Rig): boolean
 	local hr, ar = buildIK(character, humanoid, pelvis, "GetupHandR", "RightUpperArm", "RightHand", CONFIG.GETUP_SMOOTH)
 	local fl, bl = buildIK(character, humanoid, pelvis, "GetupFootL", "LeftUpperLeg", "LeftFoot", CONFIG.GETUP_SMOOTH)
 	local fr, br = buildIK(character, humanoid, pelvis, "GetupFootR", "RightUpperLeg", "RightFoot", CONFIG.GETUP_SMOOTH)
-	if hl and hr and fl and fr and al and ar and bl and br then
-		r.gIK = { hl, hr, fl, fr }
-		r.gAtt = { al, ar, bl, br }
+	local hd, ad = buildIK(character, humanoid, pelvis, "GetupHead", "LowerTorso", "Head", CONFIG.GETUP_SMOOTH)
+	if hl and hr and fl and fr and hd and al and ar and bl and br and ad then
+		r.gIK = { hl, hr, fl, fr, hd }
+		r.gAtt = { al, ar, bl, br, ad }
 		return true
 	end
 	return false
@@ -245,6 +262,9 @@ function PoseDriver.step(character: Model, dt: number)
 		if math.abs(gs[3].Weight - r.gFootW) > 0.005 then
 			gs[3].Weight = r.gFootW
 			gs[4].Weight = r.gFootW
+			-- the head target rides the foot schedule: standing intent holds
+			-- until the stand, releases through the same slow slew
+			gs[5].Weight = r.gFootW
 		end
 		if math.max(r.gHandW, r.gFootW) > 0.02 and fs == "getup" then
 			-- ground under the pelvis: the plant surface
@@ -284,6 +304,14 @@ function PoseDriver.step(character: Model, dt: number)
 			ga[2].WorldPosition = base + right * handSide + headDir * handHead
 			ga[3].WorldPosition = base - right * footSide + headDir * footHead
 			ga[4].WorldPosition = base + right * footSide + headDir * footHead
+			-- head: curled low and leaned toward the stand direction early,
+			-- directly above the pelvis at standing height by the clip end.
+			-- A face-up body stands facing AWAY from its lying head-ward axis
+			-- (sitting up reverses facing); face-down stands along it.
+			local standDir = if faceUp then -headDir else headDir
+			local headH = CONFIG.HEAD_H_FROM + (CONFIG.HEAD_H_TO - CONFIG.HEAD_H_FROM) * ease(CONFIG.HEAD_RISE_FROM, CONFIG.HEAD_RISE_TO)
+			local lean = CONFIG.HEAD_LEAN * (1 - ease(0.5, 0.9))
+			ga[5].WorldPosition = Vector3.new(base.X, groundY + headH, base.Z) + standDir * lean
 		end
 	end
 
