@@ -349,9 +349,14 @@ local function simStep(_dt: number)
 			-- the recorder caught — force the cycle, whatever the state)
 			local knockedDown = MuscleSystem.impactFactor(character) < MuscleSystem.CONFIG.IMPACT.knockdownFactor
 			-- committed topple: tilted AND rotating over fast — release NOW
-			-- instead of letting balance fight the fall to the 49° line
-			local wv = if hrp then hrp.AssemblyAngularVelocity else Vector3.zero
-			local toppling = upY < FALL.tipUp and Vector3.new(wv.X, 0, wv.Z).Magnitude > FALL.tipRate
+			-- instead of letting balance fight the fall to the 49° line.
+			-- Rate and tilt must come from the SAME body: reading the ghost's
+			-- angular velocity against the pelvis's tilt fired on walk starts
+			-- (the first step yanks the socket and spins the light ghost past
+			-- tipRate while the pelvis leans normally through 0.9)
+			local wv = if upPart then upPart.AssemblyAngularVelocity else Vector3.zero
+			local tipLine = if pelvisMode then FALL.tipUpPelvis else FALL.tipUp
+			local toppling = upY < tipLine and Vector3.new(wv.X, 0, wv.Z).Magnitude > FALL.tipRate
 			-- trip detector: the capsule is orientation-locked by balance and
 			-- NEVER tips in a trip — the BODY folds over the obstacle while
 			-- the hips hang from a gyroscope. Torso divergence is the truth.
@@ -376,6 +381,14 @@ local function simStep(_dt: number)
 				and st.resetLock == 0
 				and character:GetAttribute(MuscleSystem.CONFIG.POWERED_ATTR) == true
 			then
+				-- FT: which trigger felled him — permanent telemetry (the
+				-- step-edge over-firing hunt needed per-fall attribution)
+				character:SetAttribute("FT",
+					if knockedDown then "impact"
+					elseif st.downHold >= FALL.strandedDown then "stranded"
+					elseif toppling then "topple"
+					elseif st.torsoHold >= FALL.torsoTime then "torso"
+					else "tilt")
 				st.fallArmed = false
 				st.downHold = 0
 				st.torsoHold = 0
@@ -466,12 +479,28 @@ local function simStep(_dt: number)
 		-- free otherwise (balance/abilities own it; a world-frame servo
 		-- outside the cycle would fight FacingMoveDirection's yaw)
 		if hrp then
+			local inCycle = pelvisMode and (st.fallTimer > 0 or rising)
 			local servo = hrp:FindFirstChild("GhostUpright") :: AlignOrientation?
-			if servo then
-				local want = pelvisMode and (st.fallTimer > 0 or rising)
-				if servo.Enabled ~= want then
-					servo.Enabled = want
-				end
+			if servo and servo.Enabled ~= inCycle then
+				servo.Enabled = inCycle
+			end
+			-- ☠️ the Root socket UNHANGS during the fall cycle. On a
+			-- reflex-only fall (trip/topple/stranded — no physical hit to
+			-- the capsule) the Running ability keeps a HARD vertical hold on
+			-- the ghost: velocity writes swallowed, gY pinned (probed live
+			-- with -20 down-velocity — ten samples, not one stud), the
+			-- rise-latch teleport snapped back within 100 ms, and
+			-- ChangeState(FallingDown) never activates the ability (only
+			-- real capsule violence does — crate hits). With the socket
+			-- enabled that hold hangs the limp body at standing height by
+			-- the hips: THE marionette pin, in its final form. While the
+			-- body is down it must own its own weight; the socket returns
+			-- at the stand — attach offsets re-match within a stud and the
+			-- 2-mass ghost gets slurped to the 18.5-mass body, not vice
+			-- versa.
+			local sock = hrp:FindFirstChild("RootBallSocket") :: BallSocketConstraint?
+			if sock and sock.Enabled ~= not inCycle then
+				sock.Enabled = not inCycle
 			end
 		end
 
@@ -541,5 +570,6 @@ if not ok then
 	warn("[MuscleServer] BindToSimulation FAILED (" .. tostring(err) .. ") — Heartbeat fallback. CHECK Workspace.AuthorityMode = Server.")
 	RunService.Heartbeat:Connect(simStep)
 end
+
 
 

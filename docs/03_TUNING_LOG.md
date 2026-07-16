@@ -1142,3 +1142,47 @@ geometry unlocks (~0.2 s at peakVy 9.3) — reads as a firm push; if the user
 still calls it jumpy, the lever is a getup-specific HOVER_CAP_G (support
 margin is shared with the RC buckle and stand-on-him pin — change with
 care) or an err clamp in the hover spring.
+
+## ADDENDUM 14 — 16 JUL (early): walk-fall + the FINAL marionette — the Running ability's hard hold
+
+**User report:** "get to standing, walk forward, immediately fall — hips
+anchored midair, limbs limp." Ring-buffer trace of the exact sequence:
+
+**Walk-start fall:** the committed-topple trigger read the GHOST's angular
+velocity against the PELVIS's tilt — the first step yanks the socket and
+spins the light ghost past tipRate while the pelvis leans normally through
+0.9 (caught at spd 8.9, pUp 0.96→down). Fixed: rate and tilt now come from
+the SAME body (upPart), and pelvis mode gets its own topple line
+**FALL.tipUpPelvis 0.75** (the compliant pelvis lives past 0.9 in ordinary
+locomotion; the capsule's 0.9 assumed an orientation-locked gyro).
+
+**The pin (final form):** on a REFLEX-ONLY fall (trip/topple/stranded — no
+physical hit), the FallingDown ability never activates (fdA=false through
+the entire down) and the Running ability keeps a HARD vertical hold on the
+ghost: −20 down-velocity write swallowed within a step (ten samples, zero
+studs), the rise-latch teleport snapped back in 100 ms, and
+ChangeState(FallingDown) does nothing (only real capsule violence — crate
+hits — activates the ability). With the socket enabled, that hold hangs the
+tone-0 body at standing height by the hips. Crate falls never showed it
+because the impact itself activates FallingDown, which releases the hold.
+
+**Fix — the Root socket UNHANGS during the fall cycle (MuscleServer):**
+`RootBallSocket.Enabled = false` while `pelvisMode and (fallTimer > 0 or
+Rising)`, re-enabled at the stand (attach offsets re-match within a stud;
+the 2-mass ghost gets slurped to the 18.5-mass body, not vice versa). The
+ghost servo (GhostUpright) still provides the upright reference through the
+Root MUSCLE (orientation coupling is position-independent). The dead
+ChangeState(FallingDown) attempt was deleted.
+
+**FT telemetry (permanent):** every fall now stamps a "FT" attribute with
+its trigger — "impact" / "stranded" / "topple" / "torso" / "tilt" — read it
+after any surprise fall before theorizing.
+
+**Verified:** TEST A contact-free reflex fall (VectorForce burst on the
+torso): body HEAPS to pY 0.36 (the pin held it at 2.9), single-attempt
+rise. TEST B crate fall: unchanged, single-attempt. Walk battery: 55 studs
+at full speed including a 1-stud step-DOWN off the spawn pad — ZERO falls.
+(An earlier 10-stud walk INTO the pad face + the loose HeavyCase produced 5
+trip-falls, every rise single-attempt — that is the trip-over-props class
+working as designed, but it fires eagerly; step-UP onto ledges remains the
+known single-ray-hover edge for the post-gate pass.)

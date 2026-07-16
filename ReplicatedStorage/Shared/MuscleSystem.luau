@@ -148,6 +148,12 @@ local CONFIG = {
 		-- driven 2 rad/s spin for 1.5 s left up at 1.00) — so this only
 		-- catches capsules that physically lose the lock (sensor lost, etc).
 		tipUp = 0.9, tipRate = 1.5,
+		-- pelvis-mode topple line: the COMPLIANT pelvis routinely leans past
+		-- 0.9 in normal locomotion (AccelerationLean, walk-start sway) — at
+		-- 0.9 the first step after a getup read as a committed topple and
+		-- felled the body (caught live: spd 8.9, pUp 0.96→0.80, down).
+		-- 0.75 ≈ 41°: past any healthy stride, well before the ground.
+		tipUpPelvis = 0.75,
 		-- torso-divergence trigger — THE trip detector. In a real trip the
 		-- capsule never tips (see above); the BODY folds over the obstacle
 		-- while the hips hang from a gyroscope, and the reflex only noticed
