@@ -46,11 +46,13 @@ local CONFIG = {
 	-- health-capped ramp genuinely buckle (Gate 3 item 3: at RC 0.4 with
 	-- boost, clip + 40% legs still stood — verified live, twice).
 	RISE_BOOST = 1,
-	-- upright-TORQUE-only rise assist (a rising human actively rights the
-	-- hips — spine work we don't model joint-wise). Torque only, never
-	-- support: boosting support would re-mask the RC buckle and break the
-	-- stand-on-him pin (both live in the vertical force margin).
-	RISE_UP_BOOST = 2,
+	-- upright-TORQUE-only rise assist lever. Torque only, never support:
+	-- boosting support would re-mask the RC buckle and break the
+	-- stand-on-him pin (both live in the vertical force margin). At 2 with
+	-- a de-toned Root it whipped the pelvis (midair spasm, user-reported);
+	-- 1 since the ghost-righting fix — the ROOT MUSCLE does the righting
+	-- against an upright ghost, damped like any other muscle.
+	RISE_UP_BOOST = 1,
 	-- getup support height: the pelvis is pulled from crouch height to stand
 	-- height ACROSS the clip, so the body rises through the sequence instead
 	-- of popping to full hover

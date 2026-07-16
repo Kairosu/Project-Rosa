@@ -236,11 +236,39 @@ local function simStep(_dt: number)
 				-- per-peer pelvis read could disagree at the threshold).
 				local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
 				if pelvis then
-					character:SetAttribute(GetupPose.CONFIG.FACE_ATTR, GetupPose.isFaceUp(pelvis))
+					local faceUp = GetupPose.isFaceUp(pelvis)
+					local axis = GetupPose.headAxis(pelvis)
+					character:SetAttribute(GetupPose.CONFIG.FACE_ATTR, faceUp)
 					-- head-ward axis latched with the face flag: every peer's
 					-- plants anchor to ONE ground frame for the whole rise
 					-- (live recomputation spasmed — see GetupPose.headAxis)
-					character:SetAttribute(GetupPose.CONFIG.AXIS_ATTR, GetupPose.headAxis(pelvis))
+					character:SetAttribute(GetupPose.CONFIG.AXIS_ATTR, axis)
+					-- RIGHT THE GHOST: the Root muscle's intent is ≈identity
+					-- (pelvis aligned to the HRP), so with the ghost lying
+					-- where it fell, Root FIGHTS the rise toward a tumbled
+					-- frame (intermittent ~50° stalls). Stand the ghost up at
+					-- the pelvis — Root then PULLS the body upright, damped
+					-- like any muscle, and the capsule is pre-aligned for the
+					-- post-rise handback. GHOST ONLY (each part is its own
+					-- assembly under AJU — the body does not teleport),
+					-- positioned socket-true so the ball socket doesn't snap.
+					-- Facing = the direction the body will stand: MINUS the
+					-- head-ward axis for a face-up body (sitting up reverses
+					-- facing), along it face-down.
+					if hrp then
+						local joints = MuscleSystem.getJoints(character)
+						local root = joints and joints.Root
+						local a0 = root and (root :: any).Attachment0 :: Attachment?
+						local a1 = root and (root :: any).Attachment1 :: Attachment?
+						if a0 and a1 then
+							local standFlat = if faceUp then -axis else axis
+							local rot = CFrame.lookAt(Vector3.zero, standFlat)
+							local attWorld = (pelvis.CFrame * a1.CFrame).Position
+							hrp.CFrame = rot + (attWorld - rot:PointToWorldSpace(a0.CFrame.Position))
+							hrp.AssemblyLinearVelocity = pelvis.AssemblyLinearVelocity
+							hrp.AssemblyAngularVelocity = Vector3.zero
+						end
+					end
 				end
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
 				character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, 0)

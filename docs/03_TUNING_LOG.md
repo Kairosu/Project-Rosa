@@ -1069,3 +1069,23 @@ the hover curve with no overshoot, server whip 4.3%); fix 4 (rootF) synced
 and play-tested but the MCP bridge dropped mid-battery — final retry-rate and
 client-whip numbers pending next session. If retries persist, next levers:
 RISE_UP_BOOST 2→3, rootF 0.15→0.05, head-IK lean up.
+
+**POSTSCRIPT (same night) — rootF 0.15 was WRONG, replaced by ghost-righting:**
+user report on the fix-4 build: "spasm and go crazy midair, fall, cycle
+continues, never get up." The de-toned Root muscle was the only thing
+DAMPING the ghost HRP — at tone²≈0 the ghost is a free-swinging 2-mass
+pendulum ball-socketed to a levitating pelvis, and RISE_UP_BOOST 2 whipped
+the rest. Diagnosis (Root's reference frame is garbage during a rise) stands;
+treatment inverted:
+- **rootF REVERTED** (Root back in the spine group, full schedule).
+- **The server RIGHTS THE GHOST at the rise latch** (MuscleServer, next to
+  the GF/GA latch): hrp.CFrame = upright at the pelvis, socket-true position
+  (attachment-aligned so the ball socket doesn't snap), yaw = stand
+  direction (−GA face-up / +GA face-down), ghost angular velocity zeroed.
+  GHOST ONLY — under AJU every part is its own assembly; the body does not
+  move. Root's ≈identity intent then pulls the pelvis toward UPRIGHT: the
+  fight becomes the motor, damped like any muscle. This is the honest
+  version of what the old mid-clip track restart did by accident.
+- **RISE_UP_BOOST 2 → 1** (lever kept; Root does the righting now).
+Verification pending — MCP bridge down (needs a Studio restart); eyeball
+first, instrument battery after.
