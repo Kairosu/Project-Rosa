@@ -40,7 +40,12 @@ local CONFIG = {
 	-- getup IK choreography (ground-anchored, keyed off the lying body's
 	-- HEAD-WARD axis — the pelvis UP vector projected flat; the look vector
 	-- points into/out of the ground on a lying body and lies about facing)
-	GETUP_WEIGHT_RATE = 6, -- weight ramp per second into/out of the plant
+	GETUP_WEIGHT_RATE = 6, -- weight ramp per second INTO a plant
+	-- release is SLOWER than engage — a push hands off, it doesn't let go. The
+	-- old want-multiplication zeroed a plant's weight in ONE frame at its
+	-- off-mark, and that jolt landed inside the watchdog's judgment window: a
+	-- rocked pelvis under the fail line read as "collapses and retries"
+	GETUP_RELEASE_RATE = 3,
 	GETUP_LIFT = 0.12, -- target height above the ground hit
 	GETUP_SMOOTH = 0.1,
 	GETUP_RAY = 6,
@@ -78,10 +83,12 @@ type Rig = {
 	attL: Attachment?,
 	attR: Attachment?,
 	weight: number,
-	-- getup plant
+	-- getup plant (hands and feet slew independently: they release at
+	-- different clip marks and a shared weight snapped the earlier one)
 	gIK: { IKControl }?,
 	gAtt: { Attachment }?,
-	gWeight: number,
+	gHandW: number,
+	gFootW: number,
 	params: RaycastParams?,
 }
 local rigs: { [Model]: Rig } = setmetatable({}, { __mode = "k" }) :: any
@@ -91,7 +98,7 @@ local function ensureRig(character: Model): Rig
 	if r then
 		return r
 	end
-	r = { weight = 0, gWeight = 0 }
+	r = { weight = 0, gHandW = 0, gFootW = 0 }
 	rigs[character] = r
 	return r
 end
@@ -221,26 +228,25 @@ function PoseDriver.step(character: Model, dt: number)
 		feetWant = if clipP < CONFIG.GETUP_FEET_OFF then 1 else 0
 	end
 	if r.gIK and r.gAtt then
-		-- weight slews (never snaps); one rate for in and out
-		local blend = math.min(dt * CONFIG.GETUP_WEIGHT_RATE, 1)
-		r.gWeight += ((math.max(handsWant, feetWant)) - r.gWeight) * blend
-		local hands = r.gWeight * handsWant
-		local feet = r.gWeight * feetWant
-		-- fs left getup: everything decays through the same slew
+		-- weights slew BOTH directions, per pair (never snap — see
+		-- GETUP_RELEASE_RATE). fs left getup: both wants are already 0.
 		if fs ~= "getup" then
-			hands, feet = 0, 0
-			r.gWeight += (0 - r.gWeight) * blend
+			handsWant, feetWant = 0, 0
 		end
+		local inB = math.min(dt * CONFIG.GETUP_WEIGHT_RATE, 1)
+		local outB = math.min(dt * CONFIG.GETUP_RELEASE_RATE, 1)
+		r.gHandW += (handsWant - r.gHandW) * (if handsWant > r.gHandW then inB else outB)
+		r.gFootW += (feetWant - r.gFootW) * (if feetWant > r.gFootW then inB else outB)
 		local gs = r.gIK :: { IKControl }
-		if math.abs(gs[1].Weight - hands) > 0.005 then
-			gs[1].Weight = hands
-			gs[2].Weight = hands
+		if math.abs(gs[1].Weight - r.gHandW) > 0.005 then
+			gs[1].Weight = r.gHandW
+			gs[2].Weight = r.gHandW
 		end
-		if math.abs(gs[3].Weight - feet) > 0.005 then
-			gs[3].Weight = feet
-			gs[4].Weight = feet
+		if math.abs(gs[3].Weight - r.gFootW) > 0.005 then
+			gs[3].Weight = r.gFootW
+			gs[4].Weight = r.gFootW
 		end
-		if r.gWeight > 0.02 and fs == "getup" then
+		if math.max(r.gHandW, r.gFootW) > 0.02 and fs == "getup" then
 			-- ground under the pelvis: the plant surface
 			if not r.params then
 				local params = RaycastParams.new()
@@ -250,15 +256,14 @@ function PoseDriver.step(character: Model, dt: number)
 			end
 			local hit = Workspace:Raycast(pelvis.Position, Vector3.new(0, -CONFIG.GETUP_RAY, 0), r.params)
 			local groundY = if hit then hit.Position.Y else pelvis.Position.Y - 2.7
-			-- HEAD-WARD axis of a lying body: pelvis UP projected flat (the
-			-- spine direction); look-vector fallback for near-upright frames
-			local upv = pelvis.CFrame.UpVector
-			local headDir = Vector3.new(upv.X, 0, upv.Z)
-			if headDir.Magnitude < 0.15 then
-				local look = pelvis.CFrame.LookVector
-				headDir = Vector3.new(look.X, 0, look.Z)
-			end
-			headDir = if headDir.Magnitude > 0.001 then headDir.Unit else Vector3.zAxis
+			-- head-ward axis: LATCHED by the server at the rise moment (GA,
+			-- same latch as GF) so the plants are genuinely ground-anchored —
+			-- see GetupPose.headAxis for why live recomputation spasmed.
+			-- Local fallback covers the frames before the attribute lands.
+			local axisAttr = character:GetAttribute(GetupPose.CONFIG.AXIS_ATTR)
+			local headDir = if typeof(axisAttr) == "Vector3" and axisAttr.Magnitude > 0.5
+				then axisAttr.Unit
+				else GetupPose.headAxis(pelvis)
 			local right = Vector3.new(headDir.Z, 0, -headDir.X)
 			local function ease(from: number, to: number): number
 				local x = math.clamp((clipP - from) / math.max(to - from, 1e-3), 0, 1)

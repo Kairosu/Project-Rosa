@@ -24,6 +24,7 @@ local CONFIG = {
 	CLIP_TIME = 2.0,
 	TIME_ATTR = "GT",
 	FACE_ATTR = "GF",
+	AXIS_ATTR = "GA",
 }
 
 local GetupPose = {}
@@ -38,6 +39,24 @@ end
 
 function GetupPose.progress(t: number): number
 	return math.clamp(t / CONFIG.CLIP_TIME, 0, 1)
+end
+
+-- head-ward axis of a lying body, projected flat: the pelvis UP vector is the
+-- spine (the look vector points into/out of the ground on a lying body and
+-- lies about facing); near-upright frames fall back to look. The server calls
+-- this ONCE at the rise moment and latches the result (GA): recomputing it
+-- live swiveled every plant with the pelvis wobble, and the projection
+-- genuinely REVERSES mid-rise on a face-up body (sitting up flips facing) —
+-- near the switch threshold the axis flickered 180° frame-to-frame and the
+-- plant targets teleported with it (the late-rise leg spasm, user report).
+function GetupPose.headAxis(pelvis: BasePart): Vector3
+	local upv = pelvis.CFrame.UpVector
+	local flat = Vector3.new(upv.X, 0, upv.Z)
+	if flat.Magnitude < 0.15 then
+		local look = pelvis.CFrame.LookVector
+		flat = Vector3.new(look.X, 0, look.Z)
+	end
+	return if flat.Magnitude > 0.001 then flat.Unit else Vector3.zAxis
 end
 
 return GetupPose

@@ -51,6 +51,7 @@ type CharState = {
 	torsoHold: number, -- continuous seconds the torso has left the pose (trip detector)
 	riseTimer: number, -- watchdog: a rise that never reaches upright retries the fall cycle
 	riseElapsed: number, -- getup clip clock, mirrored to the GT attribute
+	lowHold: number, -- continuous seconds under tiltUp after clipDone (fail persistence)
 	riseFails: number, -- consecutive failed physical get-ups (3 = loud last-resort assist)
 	setupDone: boolean,
 	sprint: boolean, -- client intent via remote; custom InputActions don't sync (see Locomotion)
@@ -90,6 +91,7 @@ local function onCharacter(player: Player, character: Model)
 		torsoHold = 0,
 		riseTimer = 0,
 		riseElapsed = 0,
+		lowHold = 0,
 		riseFails = 0,
 		setupDone = false,
 		sprint = false,
@@ -210,11 +212,16 @@ local function simStep(_dt: number)
 				local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
 				if pelvis then
 					character:SetAttribute(GetupPose.CONFIG.FACE_ATTR, GetupPose.isFaceUp(pelvis))
+					-- head-ward axis latched with the face flag: every peer's
+					-- plants anchor to ONE ground frame for the whole rise
+					-- (live recomputation spasmed — see GetupPose.headAxis)
+					character:SetAttribute(GetupPose.CONFIG.AXIS_ATTR, GetupPose.headAxis(pelvis))
 				end
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, true)
 				character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, 0)
 				st.riseTimer = FALL.riseTimeout
 				st.riseElapsed = 0
+				st.lowHold = 0
 			end
 		else
 			st.upHold = if upY > FALL.riseUp then st.upHold + dtStep else 0
@@ -235,9 +242,12 @@ local function simStep(_dt: number)
 				st.riseElapsed += dtStep
 				character:SetAttribute(GetupPose.CONFIG.TIME_ATTR, st.riseElapsed)
 				-- fast-fail only once the clip has had its runtime — early in
-				-- the clip the body is SUPPOSED to be low and tilted (tucking)
+				-- the clip the body is SUPPOSED to be low and tilted (tucking).
+				-- And posture must stay under the line (failHold): one rocked
+				-- frame at a plant handoff must not scrap a succeeding rise.
 				local clipDone = st.riseElapsed >= GetupPose.CONFIG.CLIP_TIME * 0.85
-				if st.riseTimer <= 0 or (clipDone and upY < FALL.tiltUp) then
+				st.lowHold = if clipDone and upY < FALL.tiltUp then st.lowHold + dtStep else 0
+				if st.riseTimer <= 0 or st.lowHold >= FALL.failHold then
 					if upY > FALL.riseUp then
 						st.riseTimer = 0.5
 					else

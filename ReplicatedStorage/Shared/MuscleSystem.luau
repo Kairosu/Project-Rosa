@@ -130,6 +130,13 @@ local CONFIG = {
 		-- riseTimeout tracks CLIP_TIME (2.0 since the IK v2 pass): 0.6 s of
 		-- post-clip grace before posture judges the attempt
 		riseBoost = 4, riseRamp = 3, riseTimeout = 2.6, retryDown = 0.8,
+		-- failHold: the clipDone fast-fail needs upY under tiltUp for this long
+		-- CONTINUOUSLY. It was a single-frame read, and one rocked frame during
+		-- the judged window (a plant handoff, a ground contact) scrapped a rise
+		-- that was succeeding — the intermittent "collapses and retries"
+		-- (user report). Successful rises hold ≥0.94; genuine failures lie
+		-- under 0.65 for far longer than this.
+		failHold = 0.2,
 		-- committed-topple trigger: tilted past tipUp AND tipping faster than
 		-- tipRate (rad/s, horizontal axes) = it is going over NOW. Both gates
 		-- together cannot false-fire on AccelerationLean or normal wobble.

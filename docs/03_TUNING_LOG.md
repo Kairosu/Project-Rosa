@@ -969,3 +969,41 @@ physicality, but it changes any test that involved standing on objects.
 answered); the recv KB/s number therefore comes from the DebugPanel line
 ("recv: N KB/s", already on screen) during the user's run — READ IT ALOUD at
 the retest. Gate 3 remains OPEN pending: stand-on-him retest + recv KB/s.
+
+## ADDENDUM 11 — 15 JUL (later): intermittent retry + late-rise leg spasm — two mechanisms, both fixed
+
+**User report post-weight-transfer:** "sometimes collapses and retries,
+sometimes while getting up it gets jittery/spazs out a bit." Both traced to
+code, not tuning:
+
+1. **Plant releases SNAPPED.** PoseDriver's `hands = gWeight * handsWant`
+   zeroed a plant's IK weight in ONE frame at its off-mark (the slew only
+   applied on the way in — the comment lied). For a face-down body the hand
+   release (85 %) lands at the SAME moment clipDone starts judging (1.7 s),
+   and the judgment was a SINGLE-FRAME upY read: one release jolt under
+   tiltUp scrapped a succeeding rise → retry, intermittently.
+2. **The head-ward axis was recomputed live and REVERSES mid-rise.** As a
+   face-up body sits up, facing genuinely flips 180° relative to the lying
+   spine line; the up-projection→look-projection threshold switch (0.15)
+   flickered the axis frame-to-frame near vertical, teleporting foot targets
+   ±0.6 studs → the late-rise leg spasm. (Face-down rises are continuous
+   through the switch — why the spasm was intermittent.)
+
+**Fixes (all live-verified):**
+- **GA attribute**: the server latches the head-ward axis ONCE at the rise
+  moment (same latch as GF, `GetupPose.headAxis`); every peer's plants anchor
+  to one ground frame for the whole rise. Plants no longer swivel with pelvis
+  wobble — they are genuinely ground-anchored now.
+- **PoseDriver GETUP_RELEASE_RATE 3** (engage stays 6): hands and feet slew
+  independently, both directions. Max per-frame weight step measured 0.096
+  (was 1.0 — the snap).
+- **MuscleSystem FALL.failHold 0.2**: the clipDone fast-fail needs upY under
+  tiltUp for 0.2 s CONTINUOUSLY (MuscleServer st.lowHold). Successful rises
+  hold ≥ 0.94; genuine failures lie low far longer.
+
+**Instrument run (solo, 7 crate knockdowns, 4 directions):** 7/7 single-
+attempt rises, 0 retries, 0 assists. Server getup whip 6.8 % (was 21.5 %);
+ACTOR-SCREEN (client) whip 18.2 % (was 34.7 %), one 3.5-stud correction
+spike remains. minUpAfterDone 0.98 — posture rock-solid through the judged
+window. Console clean. Residual client whip is SA correction noise — that is
+the deferred post-gate netsim smoothing pass, not these mechanisms.
