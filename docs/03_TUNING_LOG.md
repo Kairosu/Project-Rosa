@@ -1186,3 +1186,26 @@ at full speed including a 1-stud step-DOWN off the spawn pad — ZERO falls.
 trip-falls, every rise single-attempt — that is the trip-over-props class
 working as designed, but it fires eagerly; step-UP onto ledges remains the
 known single-ray-hover edge for the post-gate pass.)
+
+**POSTSCRIPT — the socket-unhang overreached (user: "way buggier — camera
+falls through the world, suddenly I'm at the spawn plate; walking stops
+abruptly"):** disabling the socket for the WHOLE fall cycle cut the rope in
+the released case too. On falls where FallingDown DOES activate (crate
+hits, hard trips — the stairs), the released, collision-less ghost had
+nothing carrying it: it free-fell through the floor (the camera follows the
+HRP — the user watched the world swallow it), passed VOID_Y, and the
+stability guard reset the whole character to spawn. A displaced ghost also
+kills the input conduit (MovingDirection dies → "legs try to move, no
+movement until I stop and press again"). Corrected: the socket disables
+ONLY while the ghost is actually HELD — per-step read of the FallingDown
+ability's SyncedState.Active:
+- fdA=false through a fall (reflex-only) → ghost held → socket OFF
+  (marionette pin prevention).
+- fdA=true (real capsule violence) → ghost released → socket ON (it is the
+  only thing carrying the ghost with the body).
+Verified: reflex fall heaps to pY 0.4 with ghost at 1.5, zero resets; crate
+fall heaps to pY 0.4 with ghost carried at 1.3, zero resets, no
+through-floor. Residual: THAT crate landing took 3 retries before the stand
+(landing-pose-dependent retry rate is the next polish target — FT read
+"topple"); single-attempt on the reflex fall. Stairs remain the known
+single-ray-hover rough zone this phase.

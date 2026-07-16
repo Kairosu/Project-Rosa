@@ -484,23 +484,30 @@ local function simStep(_dt: number)
 			if servo and servo.Enabled ~= inCycle then
 				servo.Enabled = inCycle
 			end
-			-- ☠️ the Root socket UNHANGS during the fall cycle. On a
-			-- reflex-only fall (trip/topple/stranded — no physical hit to
-			-- the capsule) the Running ability keeps a HARD vertical hold on
-			-- the ghost: velocity writes swallowed, gY pinned (probed live
-			-- with -20 down-velocity — ten samples, not one stud), the
-			-- rise-latch teleport snapped back within 100 ms, and
-			-- ChangeState(FallingDown) never activates the ability (only
-			-- real capsule violence does — crate hits). With the socket
-			-- enabled that hold hangs the limp body at standing height by
-			-- the hips: THE marionette pin, in its final form. While the
-			-- body is down it must own its own weight; the socket returns
-			-- at the stand — attach offsets re-match within a stud and the
-			-- 2-mass ghost gets slurped to the 18.5-mass body, not vice
-			-- versa.
+			-- ☠️ the Root socket UNHANGS only while the ghost is HELD. Two
+			-- fall classes, opposite needs:
+			-- · fdA=false through a fall (reflex-only: trip/topple/stranded)
+			--   = the Running ability still owns the ghost with a HARD
+			--   vertical hold (velocity writes swallowed, teleports snapped
+			--   back — probed live). Socket enabled would hang the limp body
+			--   at standing height by the hips: the marionette pin. OFF.
+			-- · fdA=true (real capsule violence — crate hits, hard trips)
+			--   = the ghost is RELEASED, and the socket is the ONLY thing
+			--   carrying the collision-less ghost with the body. Cutting it
+			--   here let the ghost FREE-FALL THROUGH THE FLOOR — the camera
+			--   follows it through the world, and past VOID_Y the stability
+			--   guard reset the whole character to spawn (user report:
+			--   "camera falls through the ground and suddenly I'm at the
+			--   spawn plate"); a displaced ghost also kills the input
+			--   conduit (walk input dead until re-pressed). ON.
+			local abMgr = character:FindFirstChild("AbilityManagerActor")
+			local abFolder = abMgr and abMgr:FindFirstChild("Abilities")
+			local fdAb = abFolder and abFolder:FindFirstChild("FallingDown")
+			local fdSS = fdAb and fdAb:FindFirstChild("SyncedState")
+			local ghostHeld = inCycle and not (fdSS ~= nil and fdSS:GetAttribute("Active") == true)
 			local sock = hrp:FindFirstChild("RootBallSocket") :: BallSocketConstraint?
-			if sock and sock.Enabled ~= not inCycle then
-				sock.Enabled = not inCycle
+			if sock and sock.Enabled ~= not ghostHeld then
+				sock.Enabled = not ghostHeld
 			end
 		end
 
