@@ -1209,3 +1209,39 @@ through-floor. Residual: THAT crate landing took 3 retries before the stand
 (landing-pose-dependent retry rate is the next polish target — FT read
 "topple"); single-attempt on the reflex fall. Stairs remain the known
 single-ray-hover rough zone this phase.
+
+## ADDENDUM 15 — 16 JUL: THE FOLLOWER GHOST — the marionette class dies by construction
+
+**User: "same issues."** The socket enable/disable dance (Add. 14) kept
+failing on ability states it hadn't met (Freefall at stair edges was next).
+Structural conclusion after five marionette incarnations: the defect was
+never the dance's condition — it was having a RIGID LINK between the body
+and a part the platform can grab at all.
+
+**Pelvis mode now runs a FOLLOWER capsule:**
+- `RootBallSocket.Enabled = false` permanently in pelvis mode (stays on in
+  the legacy capsule A/B mode — MuscleServer swaps per step).
+- **GhostFollow** (MuscleSystem.setupBody): AlignPosition, OneAttachment on
+  the ghost's Root attach, MaxForce 4000 (~10× ghost weight), Responsiveness
+  50. PelvisDrive writes the goal (pelvis RootRigAttachment world position)
+  every step on BOTH peers, tone or no tone.
+- Force acts on the 2-mass GHOST ONLY: the body can never hang from the
+  capsule (no hold, timer, or unknown ability state can reach it), and the
+  ghost — camera subject, input conduit, floor sensor — can never be left
+  behind or fall through the world. Both failure families close at once.
+- GhostUpright servo unchanged (fall-cycle orientation reference for the
+  Root muscle). The rise-latch ghost teleport kept (harmless starting bias).
+
+**Verified (same-session battery):** reflex fall: heap pY 0.4, ghost follows
+to 1.3, single-attempt rise. Crate fall: heap 0.3, ghost 1.4, one retry.
+60-stud walk: travels normally. ZERO spawn-resets and zero through-floor
+events across everything; ghost-to-body distance ≤ 2 normally, 9.2 peak
+transient during the crate blast itself (follower catch-up — raise MaxForce
+if the camera reads laggy).
+
+**Named residuals (next session, tune with FT reports):** (1) landing-
+dependent getup retries (one crate landing took 3 attempts; others are
+single); (2) the pelvis-mode topple trigger is still eager — one FT=topple
+fall during a 60-stud walk over rough ground (tipUpPelvis 0.75 / tipRate
+1.5 — consider raising tipRate or requiring persistence); (3) stairs remain
+the single-ray-hover rough zone.

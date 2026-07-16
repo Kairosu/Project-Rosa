@@ -68,6 +68,8 @@ type Rig = {
 	params: RaycastParams,
 	running: Instance?,
 	mass: number,
+	follow: AlignPosition?, -- follower-ghost servo (lazy: replication may lag)
+	rootAtt: Attachment?, -- pelvis-side Root attach = the follow goal
 }
 local rigCache: { [Model]: Rig } = setmetatable({}, { __mode = "k" }) :: any
 
@@ -140,6 +142,23 @@ function PelvisDrive.step(character: Model, dt: number)
 			return
 		end
 		rigCache[character] = r
+	end
+	-- follower-ghost goal: the capsule chases the pelvis attach point, one
+	-- directional — force on the GHOST only (MuscleSystem.setupBody). BOTH
+	-- peers, every step, tone or no tone: a limp body still drags its
+	-- camera/input ghost with it.
+	if not r.follow or not r.follow.Parent then
+		local hrp = character:FindFirstChild("HumanoidRootPart")
+		r.follow = if hrp then hrp:FindFirstChild("GhostFollow") :: AlignPosition? else nil
+	end
+	if not r.rootAtt or not r.rootAtt.Parent then
+		r.rootAtt = pelvis:FindFirstChild("RootRigAttachment") :: Attachment?
+	end
+	if r.follow and r.follow.Enabled then
+		local goal = if r.rootAtt then r.rootAtt.WorldPosition else pelvis.Position
+		if (r.follow.Position - goal).Magnitude > 0.01 then
+			r.follow.Position = goal
+		end
 	end
 	local powered = character:GetAttribute("Powered") == true
 	local mt = tonumber(character:GetAttribute("MT")) or 1

@@ -554,6 +554,28 @@ function MuscleSystem.setupBody(character: Model): boolean
 		ao.Enabled = false
 		ao.Parent = hrp
 	end
+	-- ☠️ pelvis mode makes the capsule a FOLLOWER, not a carrier. The rigid
+	-- Root socket is what every marionette incarnation hung the body from —
+	-- whichever platform hold (Running's hard vertical grip, Freefall,
+	-- states we haven't met) grabbed the ghost, the socket transmitted it to
+	-- the hips; and with the socket cut the free ghost fell through the
+	-- world and took the camera with it. This one-directional position
+	-- servo replaces it in pelvis mode: force acts on the 2-mass GHOST ONLY
+	-- (OneAttachment), dragging it after the pelvis attach. The body can
+	-- never hang from the capsule BY CONSTRUCTION, and the ghost (camera,
+	-- input conduit, floor sensor) can never be left behind or plunge.
+	-- MuscleServer swaps socket/follower by mode; PelvisDrive writes the
+	-- goal every step on both peers.
+	if not hrp:FindFirstChild("GhostFollow") then
+		local ap = Instance.new("AlignPosition")
+		ap.Name = "GhostFollow"
+		ap.Mode = Enum.PositionAlignmentMode.OneAttachment
+		ap.Attachment0 = (joints.Root :: any).Attachment0
+		ap.MaxForce = 4000 -- ~10× the ghost's weight: snappy follow, zero body effect
+		ap.Responsiveness = 50
+		ap.Enabled = false
+		ap.Parent = hrp
+	end
 	for _, p in character:GetChildren() do
 		if p:IsA("BasePart") then
 			p.CollisionGroup = if p.Name == "HumanoidRootPart" then "CharRoot" else "CharBody"
