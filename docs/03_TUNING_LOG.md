@@ -1245,3 +1245,45 @@ single); (2) the pelvis-mode topple trigger is still eager — one FT=topple
 fall during a 60-stud walk over rough ground (tipUpPelvis 0.75 / tipRate
 1.5 — consider raising tipRate or requiring persistence); (3) stairs remain
 the single-ray-hover rough zone.
+
+## ADDENDUM 16 — 16 JUL: follower-ghost fallout — the float, the idle tip, the sprint pitch
+
+**User (post-follower):** arms out at first load, floating ~a stud while
+walking, camera briefly detaches at fall onset, sprint can fell you, getup
+still pivots around the hips. Instrumented findings:
+
+1. **THE FLOAT (fixed, exact-match diagnosis):** PelvisDrive's hover mass
+   summed ALL character parts including the 2.0-mass HRP — but the follower
+   capsule carries itself now (no socket hangs it from the body). The body
+   received the ghost's weight-share as free lift: equilibrium offset
+   2·g ÷ (K·m_total) = 0.63 studs, measured 0.63 exactly (pelvis 3.33,
+   feet 0.65 clear of the ground). **buildRig now excludes the HRP.**
+   Stands verified at pelvis 2.70 over ground, foot clearance 0.05.
+2. **Camera detach at fall onset (fixed):** follower catch-up lag —
+   GhostFollow MaxForce 4000 → **12000**, Responsiveness 50 → **80**.
+   Max camera-to-body distance through a full crate cycle: 12.3 → 2.3.
+3. **IDLE TIP-OVER (fixed — bigger than the user's report):** standing
+   perfectly still, pUp drifted 0.95→0.62 and the tilt trigger fired. The
+   pre-follower stand was SECRETLY SOCKET-ASSISTED — the balance-held ghost
+   was a sky-hook. The body stands on its own authority now:
+   **UP_K 55→100, UP_D 10→14, UP_CAP 120→220** (still tone- and
+   dip-scaled: weakness and staggers read unchanged). Verified: 25 s idle
+   soak, pUp never left 1.00 (was wobbling 0.76–0.99).
+4. **Sprint-launch pitch-over (fix in, flat-ground eyeball pending):** the
+   drive applied full (target−v)·K instantly — 0.36 g shove at sprint
+   start, pelvis pitched 0.94→0.50→−0.58 and genuinely went over (the
+   capsule had ACCEL_TIME smoothing; the pelvis had none). **DRIVE_RAMP
+   40 stud/s²**: the drive TARGET winds up (0→25.5 in ~0.64 s), per-rig
+   ramped tgtVel, both peers. Open-floor verification blocked by the
+   keyboard-input one-burst law (bursts died in 3 straight attempts —
+   respect the law: ONE burst per play session, period).
+5. **Spawn arms-out:** transient (~first second) — settle-phase kinematic
+   joints hold the rig's default pose until Powered flips at step 60. All
+   IK weights measured 0 after settle. Cosmetic; not chased.
+6. **Getup pivots around the hips (open, polish):** the hover pins the
+   pelvis while the body rotates about it. Lever for the smoothing pass:
+   translate the pelvis toward the foot-plant centroid across the clip
+   and/or soften early hover stiffness so the push moves the hips.
+
+Session verification totals: idle 25 s clean, walk clean, crate cycle
+single-attempt with zero resets, camera glued (≤2.3), stand height exact.

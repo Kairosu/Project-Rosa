@@ -571,8 +571,12 @@ function MuscleSystem.setupBody(character: Model): boolean
 		ap.Name = "GhostFollow"
 		ap.Mode = Enum.PositionAlignmentMode.OneAttachment
 		ap.Attachment0 = (joints.Root :: any).Attachment0
-		ap.MaxForce = 4000 -- ~10× the ghost's weight: snappy follow, zero body effect
-		ap.Responsiveness = 50
+		-- 12000 ≈ 30× ghost weight: the camera briefly detached from the body
+		-- at fall onset (follower lag, 9-stud transient at 4000) and the
+		-- Running hold's grip needs out-muscling. Still zero body effect —
+		-- force is ghost-only by mode.
+		ap.MaxForce = 12000
+		ap.Responsiveness = 80
 		ap.Enabled = false
 		ap.Parent = hrp
 	end

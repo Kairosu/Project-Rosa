@@ -35,11 +35,21 @@ local CONFIG = {
 	-- hover: spring-damper per unit mass, capped in multiples of gravity and
 	-- scaled by tone — tone below ~0.55 cannot carry body weight and sinks
 	HOVER_K = 30, HOVER_D = 9, HOVER_CAP_G = 1.8,
-	-- upright: compliant torque spring per unit mass (the anti-gyroscope)
-	UP_K = 55, UP_D = 10, UP_CAP = 120,
+	-- upright: compliant torque spring per unit mass (the anti-gyroscope).
+	-- 55/10/120 was tuned WITH the ball socket: the balance-held ghost was a
+	-- secret sky-hook stabilizing the stand. The follower capsule removed it
+	-- and idle stands slowly tipped past the tilt line (measured: spd 0,
+	-- pUp 0.95→0.62 over 1.5 s, FT=tilt). The body stands on its own
+	-- authority now — still tone- and dip-scaled, so weakness and staggers
+	-- read the same.
+	UP_K = 100, UP_D = 14, UP_CAP = 220,
 	YAW_K = 35, YAW_D = 6,
-	-- drive toward MovingDirection * SPEED (* the Running SpeedMultiplier)
-	DRIVE_K = 5, DRIVE_CAP = 70, SPEED = 16,
+	-- drive toward MovingDirection * SPEED (* the Running SpeedMultiplier).
+	-- The TARGET velocity ramps at DRIVE_RAMP stud/s² — instant full drive
+	-- shoved 0.36 g into the pelvis at sprint launch and genuinely pitched
+	-- the body over (pUp 0.94→0.50→−0.58, measured; the capsule had
+	-- ACCEL_TIME smoothing, the pelvis had none — a human winds up)
+	DRIVE_K = 5, DRIVE_CAP = 70, SPEED = 16, DRIVE_RAMP = 40,
 	-- rise assist multiplier. 2.5 was the pre-clip crutch (a bare spring
 	-- cannot right a lying body); WITH the GetupPose clip the legs and arms do
 	-- the real work and the assist is 1 (none) — which is exactly what lets a
@@ -70,6 +80,7 @@ type Rig = {
 	mass: number,
 	follow: AlignPosition?, -- follower-ghost servo (lazy: replication may lag)
 	rootAtt: Attachment?, -- pelvis-side Root attach = the follow goal
+	tgtVel: Vector3, -- ramped drive target (see DRIVE_RAMP)
 }
 local rigCache: { [Model]: Rig } = setmetatable({}, { __mode = "k" }) :: any
 
@@ -103,9 +114,13 @@ local function buildRig(character: Model, pelvis: BasePart): Rig?
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { character }
+	-- BODY mass only — the ghost carries itself (follower capsule; the
+	-- ability system hovers it). Counting the HRP's 2.0 handed the body its
+	-- weight-share as free lift: the stand floated 0.63 studs above target,
+	-- feet clear of the ground (measured; 2·g ÷ (K·m) = 0.63 exactly).
 	local mass = 0
 	for _, p in character:GetChildren() do
-		if p:IsA("BasePart") then
+		if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
 			mass += p:GetMass()
 		end
 	end
@@ -117,6 +132,7 @@ local function buildRig(character: Model, pelvis: BasePart): Rig?
 		params = params,
 		running = abilities and abilities:FindFirstChild("Running"),
 		mass = mass,
+		tgtVel = Vector3.zero,
 	}
 end
 
@@ -225,8 +241,12 @@ function PelvisDrive.step(character: Model, dt: number)
 		if r.running then
 			mult = tonumber(r.running:GetAttribute("SpeedMultiplier")) or 1
 		end
-		local target = if driveOK then Vector3.new(move.X, 0, move.Z) * CONFIG.SPEED * mult else Vector3.zero
-		local fd = (target - Vector3.new(v.X, 0, v.Z)) * m * CONFIG.DRIVE_K
+		local want = if driveOK then Vector3.new(move.X, 0, move.Z) * CONFIG.SPEED * mult else Vector3.zero
+		-- ramped target: wind up instead of shove (see DRIVE_RAMP)
+		local dv = want - r.tgtVel
+		local maxStep = CONFIG.DRIVE_RAMP * (if type(dt) == "number" then dt else 1 / 60)
+		r.tgtVel += if dv.Magnitude > maxStep then dv.Unit * maxStep else dv
+		local fd = (r.tgtVel - Vector3.new(v.X, 0, v.Z)) * m * CONFIG.DRIVE_K
 		local dcap = m * CONFIG.DRIVE_CAP * mt
 		if fd.Magnitude > dcap then
 			fd = fd.Unit * dcap
