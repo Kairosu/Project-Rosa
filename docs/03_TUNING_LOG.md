@@ -1287,3 +1287,99 @@ still pivots around the hips. Instrumented findings:
 
 Session verification totals: idle 25 s clean, walk clean, crate cycle
 single-attempt with zero resets, camera glued (≤2.3), stand height exact.
+
+## ADDENDUM 17 — 16 JUL: the sampled-PD buzz, the run-track feedback loop, and the ability locks — the "told fixed 4 times" session
+
+**User (rightly angry):** a step or two fells him; getup = "seizure on the
+ground, fully ragdolled, then slowly rotates midair around hips like it's
+pinned, then goes to standing." Demanded root causes, not tweaks. Full
+instrumented reproduction first, fixes second. FIVE root causes found and
+fixed; every one verified by recorder before and after.
+
+1. **THE SEIZURE = the upright controller itself (fixed — biggest find).**
+   The pelvis upright spring was an explicit K/D Torque updated at SIM RATE
+   (60 Hz). On a lying/limp body the pelvis's effective inertia collapses
+   (the toned chain is what makes it inert while standing) — the sampled
+   damper overshoots per frame, flips sign, and the CAP bounds a standing
+   oscillation: pelvis AssemblyAngularVelocity buzzed **~30 rad/s
+   sustained for 1.7 s** through every mid-getup, whip 20%. The buzz began
+   the exact frame tone arrived (MT ≈ 0.65) and died the moment the body
+   reached upright (chain inertia returned). 55/10/120 had the same
+   instability (the seizure predates the UP_K raise; 100/14/220 just made
+   it grind harder). **Fix: the upright authority is now a solver-integrated
+   AlignOrientation servo — `PelvisUpright` (PrimaryAxisOnly via X→up
+   attachment, vertical-only, YAW-FREE, RigidityEnabled false):
+   UP_TORQUE 220 (budget/unit-mass, × tone × dip × boost × getup schedule),
+   UP_RESP 35.** Yaw keeps the explicit torque (YAW_K 35 / YAW_D 6, new
+   YAW_CAP 80). A servo cannot self-oscillate; the budget carries every
+   readability channel exactly as the old cap did. Verified: getup pW peak
+   7.8 (was ~30 sustained), whip 14% including the crate blast itself.
+2. **"Rotates midair around the hips" = height/pitch phase mismatch
+   (fixed).** The hover height curve was clock-only: at GT 1.6 the pelvis
+   was at 1.8 studs while the body was still horizontal — BOTH FEET IN THE
+   AIR (measured lf/rf 1.0–1.65), then the pitch-up happened midair.
+   **Fix: the climb above CROUCH is gated on ACHIEVED pitch —
+   `GETUP_PITCH_FROM 0.35 / TO 0.85` (smoothstep on pelvis up-vector
+   Y) × the clock curve.** The rise is now: heap → sit up at crouch height
+   → feet planted → squat-to-stand (feet grounded through the entire
+   climb, verified). The upright budget is paced by the same clip:
+   `UP_SCHED_FLOOR 0.25, FROM 0.4, TO 0.85`; rootF's ease moved to
+   (0.4, 0.85) to match — ONE pitch schedule.
+3. **Camera detach = the Running ability's hard hold (fixed).** On violent
+   falls the hold pinned the released ghost at the fall site — measured
+   **12.7 studs** of ghost-to-pelvis gap for the entire down phase
+   (GhostFollow's 12000 force loses to a position write). **Fix: Running's
+   SyncedState Enabled=false while fallTimer > 0 only** (it is re-enabled
+   at the rise latch). Verified: gap ≤ 3.1 through a 9-stud crate launch.
+   ☠️ DOWN-PHASE ONLY: an attempted permanent disable coincided with
+   MovingDirection going dead under a held W — but the MCP keyboard bridge
+   died the same day (two later sessions: zero input with everything
+   stock-enabled), so "Running owns the input conduit" is UNPROVEN either
+   way. Do not permanently disable it without a hands-on-keyboard test.
+4. **The post-getup re-fall loop = a run-track feedback loop (fixed —
+   second-biggest find).** Diagnostic session: after a getup the character
+   fell again within 0.7–1.3 s, forever (12+ falls over two minutes, zero
+   input). Probe caught it live: with MovingDirection (0,0), the animate
+   module played **run at weight 1.00, speed 2.5–3.4** on the standing
+   body, and the ghost yaw-spun ±25–38 rad/s. Mechanism: a stand that
+   latches mid-sway → Root muscle reaction shakes the light ghost → the
+   animate module reads ghost velocity as locomotion speed → run tracks
+   pump the full-tone legs (feet measured kicking to 3.15 studs) → more
+   sway → over. Three coordinated fixes: **(a)** at rise completion
+   (upHold ≥ riseHold) the ghost is yaw-aligned to the body's ACTUAL
+   standing facing, socket-true, velocities zeroed (the yaw-free rise
+   leaves up to 180° of mismatch — the flywheel's winding spring);
+   **(b) GhostUpright is now enabled full-time in pelvis mode** (with the
+   hold locked out during down the ghost needs a standing orientation
+   authority; PrimaryAxisOnly = yaw stays free for FacingMoveDirection);
+   **(c) `ROOT_PELVIS_TONE 0.2`** — while upright/stumble in pelvis mode
+   the Root muscle drops to a soft tether (the stand needs no Root:
+   vertical = servo, yaw = drive torque, support = hover; its only
+   full-tone contribution was shaking the ghost). Verified: 4/4 crate
+   cycles → single-attempt rises → stands held 10+ s each, zero track
+   ignitions, zero re-falls.
+5. **Two ability-system rats (fixed):** (a) the stock FallingDown ability
+   FLAPPED active 0.05–0.4 s after getups (its violence detector reading
+   the cycle handback), each flap deactivating Running → dead input, dead
+   tracks, one outright fall — **FallingDown SyncedState is disabled in
+   pelvis mode, per-step enforced** (its one legitimate job, releasing the
+   capsule, is done by setCapsuleReleased every step; the old "must stay
+   enabled" law was socket-era). (b) noteImpact's "only a standing body"
+   gate read the GHOST's up-vector — servo-held VERTICAL through the whole
+   fall cycle, so the gate was permanently open on downed bodies: down-
+   phase thrash armed a dip and re-felled the body the frame the rise
+   began (FT=impact 0.03 s into a getup, caught live). **The gate reads
+   the PELVIS in pelvis mode.**
+
+**Verified totals (final build, one session):** 32 s idle soak: pUp 1.00,
+pW 0.00, zero events. 4 crate knockdowns from 4 directions: 4 single-
+attempt rises (down 1.6 s + rise ~3.2 s), 4 stable stands ≥ 10 s, zero
+retries, zero resets, zero FallingDown flaps, camera glued. Getup reads:
+gather → sit up low → feet under → stand.
+
+**NOT verified (MCP keyboard bridge died — needs the user's hands):**
+walking, sprint (DRIVE_RAMP 40 still awaiting a live sprint), stairs.
+**Watch for:** post-stand steadiness after walking stops (the loop's other
+seed case), turn feel with Root at 0.2 (animated hip sway is mostly gone —
+if turns read dead, raise ROOT_PELVIS_TONE toward 0.4), getup retry rate
+on ugly landings (0 retries in 6 cycles today).

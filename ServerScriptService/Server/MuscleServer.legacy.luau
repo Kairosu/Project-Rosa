@@ -284,6 +284,30 @@ local function simStep(_dt: number)
 				st.fallArmed = true
 				st.riseFails = 0
 				character:SetAttribute(MuscleSystem.CONFIG.RISING_ATTR, false)
+				-- rise complete: align the ghost's yaw to wherever the body
+				-- ACTUALLY stood up facing. The rise is yaw-free (the servo is
+				-- PrimaryAxisOnly), so the body organizes its own facing while
+				-- the ghost still points at the latch-time guess — up to 180°
+				-- apart. At full Root tone that mismatch spins the light ghost
+				-- like a flywheel (measured post-stand: ghost wY ±38 rad/s; the
+				-- animate module read the thrash as sprint speed and played run
+				-- tracks on the standing body — the legs kicked it straight
+				-- back over, the post-getup re-fall loop). Socket-true, once.
+				local pelvis = character:FindFirstChild("LowerTorso") :: BasePart?
+				local root = joints and joints.Root
+				local a0 = root and (root :: any).Attachment0 :: Attachment?
+				local a1 = root and (root :: any).Attachment1 :: Attachment?
+				if hrp and pelvis and a0 and a1 then
+					local look = pelvis.CFrame.LookVector
+					local flat = Vector3.new(look.X, 0, look.Z)
+					if flat.Magnitude > 0.1 then
+						local rot = CFrame.lookAt(Vector3.zero, flat.Unit)
+						local attWorld = (pelvis.CFrame * a1.CFrame).Position
+						hrp.CFrame = rot + (attWorld - rot:PointToWorldSpace(a0.CFrame.Position))
+						hrp.AssemblyLinearVelocity = pelvis.AssemblyLinearVelocity
+						hrp.AssemblyAngularVelocity = Vector3.zero
+					end
+				end
 			end
 			-- rise watchdog. A rise that TOPPLES has failed NOW — waiting out the
 			-- clock leaves a downed body pinned to a fully powered, walkable
@@ -474,12 +498,13 @@ local function simStep(_dt: number)
 			PelvisDrive.idle(character)
 		end
 
-		-- ghost inner-ear gate: held upright through the fall cycle (the
-		-- Root muscle spins a free ghost like a flywheel — see setupBody),
-		-- free otherwise (balance/abilities own it; a world-frame servo
-		-- outside the cycle would fight FacingMoveDirection's yaw)
+		-- ghost inner ear: with the Running hold locked out of pelvis mode
+		-- the ghost has NO platform orientation authority left — a free
+		-- 2-mass part on a position servo would tumble and take the camera
+		-- with it. Held vertical full-time in pelvis mode. Yaw stays free
+		-- (PrimaryAxisOnly): FacingMoveDirection and the Root muscle own it.
 		if hrp then
-			local inCycle = pelvisMode and (st.fallTimer > 0 or rising)
+			local inCycle = pelvisMode
 			local servo = hrp:FindFirstChild("GhostUpright") :: AlignOrientation?
 			if servo and servo.Enabled ~= inCycle then
 				servo.Enabled = inCycle
@@ -498,6 +523,41 @@ local function simStep(_dt: number)
 			local follow = hrp:FindFirstChild("GhostFollow") :: AlignPosition?
 			if follow and follow.Enabled ~= pelvisMode then
 				follow.Enabled = pelvisMode
+			end
+			-- the Running ability's hard hold pins the released ghost wherever
+			-- the fall began — a violent fall left it hanging 12.7 studs from
+			-- the body for the entire down phase (the user's camera detach;
+			-- GhostFollow's force cannot beat a position write). Sanctioned
+			-- channel, same lock as GettingUp — but DOWN-PHASE ONLY: Running
+			-- IS the input conduit (verified live: with it disabled, a held W
+			-- never writes MovingDirection — the character is deaf). The rise
+			-- latch re-enables it so the hold receives a righted,
+			-- correctly-placed ghost and input comes back with the stand.
+			local mgr = character:FindFirstChild("AbilityManagerActor")
+			local ab = mgr and mgr:FindFirstChild("Abilities")
+			local run = ab and ab:FindFirstChild("Running")
+			local rss = run and run:FindFirstChild("SyncedState")
+			if rss then
+				local wantRun = not (pelvisMode and st.fallTimer > 0)
+				if rss:GetAttribute("Enabled") ~= wantRun then
+					rss:SetAttribute("Enabled", wantRun)
+				end
+			end
+			-- the stock FallingDown ability is OBSOLETE in pelvis mode and
+			-- actively hostile: with the capsule permanently released and the
+			-- follower ghost jolting at cycle handbacks, its own violence
+			-- detector FLAPPED active after getups (caught live: activations
+			-- 0.05–0.4 s after FS→upright, no external contact) — each one
+			-- deactivates Running, kills the MovingDirection conduit (the
+			-- user's "walking just stops"), stops tracks at full tone, and
+			-- one felled the standing body outright. Its one legitimate job —
+			-- releasing the capsule on real violence — is done by
+			-- setCapsuleReleased every step in pelvis mode. The old "must
+			-- stay enabled" law predates the follower ghost (socket era).
+			local fd = ab and ab:FindFirstChild("FallingDown")
+			local fss = fd and fd:FindFirstChild("SyncedState")
+			if fss and fss:GetAttribute("Enabled") ~= not pelvisMode then
+				fss:SetAttribute("Enabled", not pelvisMode)
 			end
 		end
 

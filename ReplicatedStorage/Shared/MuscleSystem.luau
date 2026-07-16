@@ -170,6 +170,16 @@ local CONFIG = {
 		-- the entire class self-healing instead of chasing each door.
 		strandedDown = 0.75,
 	},
+	-- Root tone factor while UPRIGHT in pelvis mode. The stand doesn't need
+	-- Root (vertical = PelvisUpright servo, yaw = the drive's facing torque,
+	-- support = hover): its only full-tone effect was shaking the 2-mass
+	-- ghost with reaction torque whenever the body swayed — the ghost's yaw
+	-- thrash read as locomotion speed to the animate module, which played
+	-- run tracks on the standing body and kicked it over (the post-getup
+	-- re-fall loop, measured: ghost wY ±25 within 0.15 s of a stand that
+	-- latched mid-sway). 0.2 keeps a soft tether; the getup keeps its own
+	-- rootF schedule (there Root genuinely rights the body).
+	ROOT_PELVIS_TONE = 0.2,
 	RISING_ATTR = "Rising",
 	-- the four-state machine (Phase 3), server-mirrored for both peers and
 	-- every instrument: "upright" / "stumble" / "down" / "getup"
@@ -453,16 +463,20 @@ function MuscleSystem.step(character: Model)
 		-- arriving before the clip ends, the final straighten snapped to the
 		-- idle pose — the tail of the "quick get into place" read
 		spineF = 0.35 + 0.65 * ease(0.35, 0.9)
-		-- Root PACES THE PITCH-UP: its intent is "align with the ghost",
-		-- the ghost is servo-held vertical (GhostUpright, setupBody), so
-		-- Root's authority is the rate the body rights itself. Full early
-		-- authority stood the body up in one 0.3 s burst off the planted
-		-- feet (pelvis 1.3→2.9, peakVy 9.5 — the "jumping up" remnant);
-		-- this ease spreads the pitch across the clip's second half. The
-		-- 0.25 floor keeps the ghost tethered — but the near-zero-tone
-		-- free-pendulum failure (rootF 0.15 iteration) cannot reopen
-		-- anyway, because the servo owns the ghost now.
-		rootF = 0.25 + 0.75 * ease(0.5, 0.95)
+		-- Root rides the SAME pitch schedule as the pelvis upright servo
+		-- (PelvisDrive UP_SCHED_*): at body mass the servo is the real pitch
+		-- actuator and Root is a tether to the vertical ghost — but the two
+		-- schedules must agree or Root drags the pelvis toward upright while
+		-- the servo is still deliberately soft. The 0.25 floor keeps the
+		-- ghost tethered; the free-pendulum failure (rootF 0.15 iteration)
+		-- cannot reopen because the servo owns the ghost.
+		rootF = 0.25 + 0.75 * ease(0.4, 0.85)
+	end
+	-- pelvis mode, not mid-getup: Root drops to a soft tether (see
+	-- ROOT_PELVIS_TONE). During "down" tone is 0 anyway; during getup the
+	-- schedule above owns it.
+	if character:GetAttribute("PelvisMode") == true and state ~= "getup" then
+		rootF = math.min(rootF, CONFIG.ROOT_PELVIS_TONE)
 	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any
@@ -828,8 +842,20 @@ function MuscleSystem.noteImpact(character: Model, peakRel: number, dt: number)
 		return
 	end
 	-- only a STANDING body can be knocked off balance; while tilted or rising the
-	-- reflex stays silent so it cannot sabotage its own recovery
-	if hrp.CFrame.UpVector.Y < imp.uprightGate then
+	-- reflex stays silent so it cannot sabotage its own recovery.
+	-- pelvis mode: the gate must read the BODY — the ghost is servo-held
+	-- VERTICAL through the whole fall cycle (GhostUpright), so reading it left
+	-- this gate permanently open on a downed body: the down-phase thrash armed
+	-- a dip and the persisted window re-felled the body the frame the rise
+	-- began (FT=impact 0.03 s into a getup, caught live)
+	local upRef: BasePart = hrp
+	if character:GetAttribute("PelvisMode") == true then
+		local pelvis = character:FindFirstChild("LowerTorso")
+		if pelvis and pelvis:IsA("BasePart") then
+			upRef = pelvis
+		end
+	end
+	if upRef.CFrame.UpVector.Y < imp.uprightGate then
 		return
 	end
 

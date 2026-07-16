@@ -35,15 +35,30 @@ local CONFIG = {
 	-- hover: spring-damper per unit mass, capped in multiples of gravity and
 	-- scaled by tone — tone below ~0.55 cannot carry body weight and sinks
 	HOVER_K = 30, HOVER_D = 9, HOVER_CAP_G = 1.8,
-	-- upright: compliant torque spring per unit mass (the anti-gyroscope).
-	-- 55/10/120 was tuned WITH the ball socket: the balance-held ghost was a
-	-- secret sky-hook stabilizing the stand. The follower capsule removed it
-	-- and idle stands slowly tipped past the tilt line (measured: spd 0,
-	-- pUp 0.95→0.62 over 1.5 s, FT=tilt). The body stands on its own
-	-- authority now — still tone- and dip-scaled, so weakness and staggers
-	-- read the same.
-	UP_K = 100, UP_D = 14, UP_CAP = 220,
-	YAW_K = 35, YAW_D = 6,
+	-- upright: a solver-integrated AlignOrientation servo (PrimaryAxisOnly —
+	-- vertical-only, yaw-free), NOT an explicit K/D Torque. The old sampled
+	-- PD (55/10/120, then 100/14/220) was updated at sim rate against a body
+	-- whose effective inertia collapses whenever the chain is limp or
+	-- grounded (getup, knockdown): the damper overshot per frame, flipped
+	-- sign, and the cap bounded a standing ~30 rad/s pelvis oscillation
+	-- through every mid-getup — the "seizure on the ground" (measured live;
+	-- the idle stand survived only because a full-tone chain adds inertia).
+	-- The servo cannot self-oscillate; tone, dip, and the getup schedule
+	-- scale its BUDGET, so weakness and staggers read exactly as before.
+	UP_TORQUE = 220, UP_RESP = 35,
+	YAW_K = 35, YAW_D = 6, YAW_CAP = 80,
+	-- getup pitch pacing: the pelvis servo IS the pitch actuator (its budget
+	-- dwarfs the Root muscle at body mass) — unscheduled it rammed a lying
+	-- pelvis at full stance authority from the first toned frame. Soft while
+	-- the plants organize, full through the clip's second half.
+	UP_SCHED_FLOOR = 0.25, UP_SCHED_FROM = 0.4, UP_SCHED_TO = 0.85,
+	-- getup height is gated on ACHIEVED pitch (pelvis up-vector), not just
+	-- the clock: the clock-only ramp hoisted a still-horizontal body to 1.8
+	-- studs mid-clip — feet swinging in the air, the rise reading as a
+	-- hip-pinned midair rotation (measured; user report ×3). You don't rise
+	-- until you're over your feet: crouch-low until the body is actually
+	-- pitching up, then the ramp is a squat-to-stand on planted feet.
+	GETUP_PITCH_FROM = 0.35, GETUP_PITCH_TO = 0.85,
 	-- drive toward MovingDirection * SPEED (* the Running SpeedMultiplier).
 	-- The TARGET velocity ramps at DRIVE_RAMP stud/s² — instant full drive
 	-- shoved 0.36 g into the pelvis at sprint launch and genuinely pitched
@@ -80,6 +95,7 @@ type Rig = {
 	mass: number,
 	follow: AlignPosition?, -- follower-ghost servo (lazy: replication may lag)
 	rootAtt: Attachment?, -- pelvis-side Root attach = the follow goal
+	upright: AlignOrientation?, -- pelvis upright servo (lazy, same reason)
 	tgtVel: Vector3, -- ramped drive target (see DRIVE_RAMP)
 }
 local rigCache: { [Model]: Rig } = setmetatable({}, { __mode = "k" }) :: any
@@ -111,6 +127,23 @@ local function buildRig(character: Model, pelvis: BasePart): Rig?
 		tq.Torque = Vector3.zero
 		tq.Parent = pelvis
 	end
+	if RunService:IsServer() and not pelvis:FindFirstChild("PelvisUpright") then
+		local upAtt = Instance.new("Attachment")
+		upAtt.Name = "PelvisUprightAtt"
+		upAtt.CFrame = CFrame.Angles(0, 0, math.rad(90)) -- primary axis = pelvis up
+		upAtt.Parent = pelvis
+		local ao = Instance.new("AlignOrientation")
+		ao.Name = "PelvisUpright"
+		ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
+		ao.Attachment0 = upAtt
+		ao.PrimaryAxisOnly = true
+		ao.CFrame = CFrame.Angles(0, 0, math.rad(90)) -- goal: pelvis up = world +Y
+		ao.RigidityEnabled = false
+		ao.Responsiveness = CONFIG.UP_RESP
+		ao.MaxTorque = 0
+		ao.Enabled = false
+		ao.Parent = pelvis
+	end
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { character }
@@ -132,6 +165,7 @@ local function buildRig(character: Model, pelvis: BasePart): Rig?
 		params = params,
 		running = abilities and abilities:FindFirstChild("Running"),
 		mass = mass,
+		upright = pelvis:FindFirstChild("PelvisUpright") :: AlignOrientation?,
 		tgtVel = Vector3.zero,
 	}
 end
@@ -142,6 +176,9 @@ function PelvisDrive.idle(character: Model)
 	if r and (r.vf.Force ~= Vector3.zero or r.tq.Torque ~= Vector3.zero) then
 		r.vf.Force = Vector3.zero
 		r.tq.Torque = Vector3.zero
+	end
+	if r and r.upright and r.upright.Enabled then
+		r.upright.Enabled = false
 	end
 end
 
@@ -170,6 +207,9 @@ function PelvisDrive.step(character: Model, dt: number)
 	if not r.rootAtt or not r.rootAtt.Parent then
 		r.rootAtt = pelvis:FindFirstChild("RootRigAttachment") :: Attachment?
 	end
+	if not r.upright or not r.upright.Parent then
+		r.upright = pelvis:FindFirstChild("PelvisUpright") :: AlignOrientation?
+	end
 	if r.follow and r.follow.Enabled then
 		local goal = if r.rootAtt then r.rootAtt.WorldPosition else pelvis.Position
 		if (r.follow.Position - goal).Magnitude > 0.01 then
@@ -181,6 +221,10 @@ function PelvisDrive.step(character: Model, dt: number)
 	if not powered or mt <= 0.05 then
 		r.vf.Force = Vector3.zero
 		r.tq.Torque = Vector3.zero
+		-- a limp body is not held upright by anything
+		if r.upright and r.upright.Enabled then
+			r.upright.Enabled = false
+		end
 		return
 	end
 	local m = r.mass
@@ -207,11 +251,22 @@ function PelvisDrive.step(character: Model, dt: number)
 	-- yanking to full height (p² ended at max slope — the terminal "quick
 	-- get into place" pop, user-reported on the IK v2 pass)
 	local height = CONFIG.HEIGHT
+	local upSched = 1
 	if fs == "getup" then
 		local t = tonumber(character:GetAttribute(GetupPose.CONFIG.TIME_ATTR)) or 0
 		local p = GetupPose.progress(t)
 		local curve = p * p * p * (4 - 3 * p)
-		height = CONFIG.CROUCH + (CONFIG.HEIGHT - CONFIG.CROUCH) * curve
+		-- upright budget paced by the clip (see UP_SCHED_*): the servo owns
+		-- the pitch-up, and full stance authority on a lying body was the
+		-- grind that threw the heap around while the plants were organizing
+		local sx = math.clamp((p - CONFIG.UP_SCHED_FROM) / (CONFIG.UP_SCHED_TO - CONFIG.UP_SCHED_FROM), 0, 1)
+		upSched = CONFIG.UP_SCHED_FLOOR + (1 - CONFIG.UP_SCHED_FLOOR) * sx * sx * (3 - 2 * sx)
+		-- height gated on ACHIEVED pitch (see GETUP_PITCH_*): stay crouched
+		-- until the body is genuinely coming upright, then squat-to-stand
+		local pu = pelvis.CFrame.UpVector.Y
+		local pitch = math.clamp((pu - CONFIG.GETUP_PITCH_FROM) / (CONFIG.GETUP_PITCH_TO - CONFIG.GETUP_PITCH_FROM), 0, 1)
+		pitch = pitch * pitch * (3 - 2 * pitch)
+		height = CONFIG.CROUCH + (CONFIG.HEIGHT - CONFIG.CROUCH) * curve * pitch
 	end
 
 	local force = Vector3.zero
@@ -255,13 +310,24 @@ function PelvisDrive.step(character: Model, dt: number)
 	end
 	r.vf.Force = force
 
-	-- compliant upright spring: axis = up × Y rights it, sin(tilt)-weighted.
-	-- STUMBLE dips it with the impact factor — a hit genuinely wobbles the
-	-- body now (this is the pelvis-mode half of the stagger system)
+	-- compliant upright hold: the servo's BUDGET carries every readability
+	-- channel — tone (weak = toppleable), the STUMBLE dip (a hit genuinely
+	-- wobbles the body), and the getup schedule. The servo itself is
+	-- solver-stable at any budget (see CONFIG.UP_TORQUE).
 	local dip = math.max(MuscleSystem.impactFactor(character), MuscleSystem.CONFIG.IMPACT.knockdownFactor)
 	local upB = if rising then CONFIG.RISE_UP_BOOST else 1
-	local up = pelvis.CFrame.UpVector
-	local torque = (up:Cross(Vector3.yAxis) * CONFIG.UP_K * boost * upB * dip - Vector3.new(w.X, 0, w.Z) * CONFIG.UP_D) * m
+	if r.upright then
+		local budget = m * CONFIG.UP_TORQUE * mt * boost * upB * dip * upSched
+		if r.upright.MaxTorque ~= budget then
+			r.upright.MaxTorque = budget
+		end
+		if not r.upright.Enabled then
+			r.upright.Enabled = true
+		end
+	end
+	-- yaw stays an explicit torque (the servo is yaw-free by construction):
+	-- face MovingDirection while driving
+	local torque = Vector3.zero
 	local mh = Vector3.new(move.X, 0, move.Z)
 	if driveOK and mh.Magnitude > 0.1 then
 		local look = pelvis.CFrame.LookVector
@@ -270,12 +336,12 @@ function PelvisDrive.step(character: Model, dt: number)
 			lh = lh.Unit
 			mh = mh.Unit
 			local ang = math.atan2(lh:Cross(mh).Y, lh:Dot(mh))
-			torque += Vector3.new(0, ang * CONFIG.YAW_K - w.Y * CONFIG.YAW_D, 0) * m
+			torque = Vector3.new(0, ang * CONFIG.YAW_K - w.Y * CONFIG.YAW_D, 0) * m
+			local ycap = m * CONFIG.YAW_CAP * mt
+			if torque.Magnitude > ycap then
+				torque = torque.Unit * ycap
+			end
 		end
-	end
-	local tcap = m * CONFIG.UP_CAP * mt * boost * upB
-	if torque.Magnitude > tcap then
-		torque = torque.Unit * tcap
 	end
 	r.tq.Torque = torque
 end
