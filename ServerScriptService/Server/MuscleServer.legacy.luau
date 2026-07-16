@@ -267,6 +267,8 @@ local function simStep(_dt: number)
 							hrp.CFrame = rot + (attWorld - rot:PointToWorldSpace(a0.CFrame.Position))
 							hrp.AssemblyLinearVelocity = pelvis.AssemblyLinearVelocity
 							hrp.AssemblyAngularVelocity = Vector3.zero
+							-- (the inner-ear servo is vertical-only — the
+							-- teleport's yaw is a starting bias, not a goal)
 						end
 					end
 				end
@@ -457,6 +459,20 @@ local function simStep(_dt: number)
 			PelvisDrive.step(character, dtStep)
 		else
 			PelvisDrive.idle(character)
+		end
+
+		-- ghost inner-ear gate: held upright through the fall cycle (the
+		-- Root muscle spins a free ghost like a flywheel — see setupBody),
+		-- free otherwise (balance/abilities own it; a world-frame servo
+		-- outside the cycle would fight FacingMoveDirection's yaw)
+		if hrp then
+			local servo = hrp:FindFirstChild("GhostUpright") :: AlignOrientation?
+			if servo then
+				local want = pelvisMode and (st.fallTimer > 0 or rising)
+				if servo.Enabled ~= want then
+					servo.Enabled = want
+				end
+			end
 		end
 
 		-- the four-state machine (Phase 3), mirrored for both peers: drives the

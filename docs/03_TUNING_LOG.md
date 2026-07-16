@@ -1089,3 +1089,56 @@ treatment inverted:
 - **RISE_UP_BOOST 2 → 1** (lever kept; Root does the righting now).
 Verification pending — MCP bridge down (needs a Studio restart); eyeball
 first, instrument battery after.
+
+## ADDENDUM 13 — 15 JUL (later still): the whirling ghost — midair spasm root cause and the inner-ear servo
+
+**User report (twice, across two fix attempts):** "spasms like crazy in mid
+air and never gets up." Mega-recorder (10 Hz: states, tracks, pelvis+ghost
+orientation, worst-part displacement) told the real story:
+
+**ROOT CAUSE — the ghost HRP was a whirling flywheel.** With the fall cycle
+owning the body, the ability system has the controller released, so the
+ghost is a free 2-mass body on the Root socket — and the Root muscle's
+reaction torque SPINS it (up-vector flipping ±1.0 every 100 ms; HRP was the
+worst-moving part of nearly every getup frame at 0.5–0.95 studs/frame). The
+body was being shaken by its own ghost through the Root muscle. Both
+"failed" attempts in the trace actually reached upY 0.91–0.97 — nearly
+standing — then got wobbled back under the fail line during plant release.
+The accidental control: when the stock FallingDown window expired mid-test
+and Running's balance gyro grabbed the ghost, gUp locked to 1.00 and the
+rise instantly went calm. The one-shot ghost-right teleport (Add. 12
+postscript) was insufficient — righted at GT 0.0, thrashing again by 0.2.
+
+**FIX — GhostUpright, the ghost's inner ear (MuscleSystem.setupBody):**
+AlignOrientation on the HRP, OneAttachment, MaxTorque 50k, Responsiveness
+50, **PrimaryAxisOnly via an X→up attachment (CFrame.Angles(0,0,90°) on
+both attachment and goal): VERTICAL-ONLY, YAW-FREE.** The first (full-frame)
+version corkscrew-VAULTED the body whenever the latched yaw guessed facing
+wrong on a side-lying landing — pelvis inverted at standing height (minUp
+−0.97, pY 3.49), pole-vaulted off the planted feet. With yaw free the light
+ghost yields and the body stands facing wherever it organized. Enabled only
+while `pelvisMode and (fallTimer > 0 or Rising)` (MuscleServer) — outside
+the cycle balance/abilities own the ghost, and a world-frame servo would
+fight FacingMoveDirection's yaw.
+
+**Supporting values:**
+- retryDown 0.8 → **1.2**: a rise that fails HIGH needs time to actually
+  come down — at 0.8 the re-latch read a midair body as lying (retry rises
+  started at pY 2.86) and the choreography fought a standing body.
+- Root tone during getup = **0.25 + 0.75·ease(0.5, 0.95)** (rootF): with
+  the servo holding the ghost vertical, Root's intent (≈identity to the
+  ghost) is "stand up", and its authority is the PITCH-UP RATE — full
+  authority stood the body in one 0.3 s burst (pelvis 1.3→2.9, peakVy 9.5).
+  The ease spreads the pitch across the clip's second half. Safe now: the
+  near-zero-tone free-pendulum failure cannot reopen (servo owns the ghost).
+- Ghost-right teleport kept (socket-true, stand-direction yaw) as the
+  starting bias; the servo, not the teleport, is what holds.
+
+**Verified (4-crate battery + 1 bonus knockdown):** 5/5 single-attempt
+rises, 0 retries, minGhostUp 1.00 (no thrash frames), server whip 7.8%,
+maxPelvisY 3.10 (0.27 overshoot, settles in ~0.5 s), every profile
+gather→push→settle at 2.83. Remaining known burst: hover catch-up after the
+geometry unlocks (~0.2 s at peakVy 9.3) — reads as a firm push; if the user
+still calls it jumpy, the lever is a getup-specific HOVER_CAP_G (support
+margin is shared with the RC buckle and stand-on-him pin — change with
+care) or an err clamp in the hover spring.

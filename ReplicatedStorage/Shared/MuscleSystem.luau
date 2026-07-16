@@ -129,7 +129,11 @@ local CONFIG = {
 		-- must stay longer than GetupPose.CONFIG.CLIP_TIME.
 		-- riseTimeout tracks CLIP_TIME (2.4 since the jump-read fix): 0.6 s of
 		-- post-clip grace before posture judges the attempt
-		riseBoost = 4, riseRamp = 3, riseTimeout = 3.0, retryDown = 0.8,
+		-- retryDown 1.2 (was 0.8): a rise that fails HIGH (vault/flip class)
+		-- needs time to actually come DOWN — at 0.8 the re-latch read a
+		-- midair body as lying (retry rises started at pY 2.86, measured)
+		-- and the next choreography fought a body that wasn't on the ground
+		riseBoost = 4, riseRamp = 3, riseTimeout = 3.0, retryDown = 1.2,
 		-- failHold: the clipDone fast-fail needs upY under tiltUp for this long
 		-- CONTINUOUSLY. It was a single-frame read, and one rocked frame during
 		-- the judged window (a plant handoff, a ground contact) scrapped a rise
@@ -423,7 +427,7 @@ function MuscleSystem.step(character: Model)
 	-- push), legs power in through the middle (they take the load), the spine
 	-- firms last (the torso UNFURLS instead of pivoting up as one stiff
 	-- slab — user feedback: "pure stiff limbs, we just rotate up").
-	local legF, armF, spineF = 1, 1, 1
+	local legF, armF, spineF, rootF = 1, 1, 1, 1
 	local state = character:GetAttribute(CONFIG.STATE_ATTR)
 	if state == "stumble" then
 		legF = math.max(MuscleSystem.impactFactor(character), CONFIG.STUMBLE_LEG_FLOOR)
@@ -443,12 +447,16 @@ function MuscleSystem.step(character: Model)
 		-- arriving before the clip ends, the final straighten snapped to the
 		-- idle pose — the tail of the "quick get into place" read
 		spineF = 0.35 + 0.65 * ease(0.35, 0.9)
-		-- Root stays in the spine group. Its intent (≈identity: pelvis
-		-- aligned to the HRP) is only as good as the ghost's frame — which is
-		-- why the SERVER RIGHTS THE GHOST at the rise latch (MuscleServer).
-		-- Do NOT zero Root here instead: at near-zero tone the ghost becomes
-		-- a free-swinging pendulum on the Root socket and pumps the rise into
-		-- a midair spasm (user-reported, the rootF 0.15 iteration).
+		-- Root PACES THE PITCH-UP: its intent is "align with the ghost",
+		-- the ghost is servo-held vertical (GhostUpright, setupBody), so
+		-- Root's authority is the rate the body rights itself. Full early
+		-- authority stood the body up in one 0.3 s burst off the planted
+		-- feet (pelvis 1.3→2.9, peakVy 9.5 — the "jumping up" remnant);
+		-- this ease spreads the pitch across the clip's second half. The
+		-- 0.25 floor keeps the ghost tethered — but the near-zero-tone
+		-- free-pendulum failure (rootF 0.15 iteration) cannot reopen
+		-- anyway, because the servo owns the ghost now.
+		rootF = 0.25 + 0.75 * ease(0.5, 0.95)
 	end
 	for name, joint in joints do
 		-- enforced every step: self-heals the known AJU stuck-joint bug and any
@@ -459,7 +467,9 @@ function MuscleSystem.step(character: Model)
 		if powered then
 			local v = values[name]
 			local jointTone = mt
-			if name:find("Hip") or name:find("Knee") or name:find("Ankle") then
+			if name == "Root" then
+				jointTone *= rootF
+			elseif name:find("Hip") or name:find("Knee") or name:find("Ankle") then
 				jointTone *= legF
 			elseif name:find("Shoulder") or name:find("Elbow") or name:find("Wrist") then
 				jointTone *= armF
@@ -501,6 +511,42 @@ function MuscleSystem.setupBody(character: Model): boolean
 		sock.Attachment1 = (joints.Root :: any).Attachment1
 		sock.LimitsEnabled = false
 		sock.Parent = hrp
+	end
+	-- the ghost's INNER EAR (pelvis mode): while the fall cycle owns the
+	-- body the ability system has the controller released, so the ghost is
+	-- a light (mass 2) free flywheel on the Root socket — and the Root
+	-- muscle's reaction torque spins it wildly (measured: ghost up-vector
+	-- flipping ±1 every 100 ms, HRP the worst-moving part of most getup
+	-- frames at 0.5-0.95 studs/frame). The body was being SHAKEN by its own
+	-- ghost; two near-stands were wobbled back under the fail line during
+	-- plant release. This servo holds the ghost's ORIENTATION while the
+	-- fall cycle runs (MuscleServer gates Enabled and sets the yaw at the
+	-- rise latch); the Root muscle then pulls the BODY toward upright
+	-- instead of trading spin with a flywheel. The proof was accidental:
+	-- when the stock FallingDown window expired mid-test and Running's
+	-- balance gyro grabbed the ghost, the rise instantly went calm.
+	-- VERTICAL-ONLY, YAW-FREE (PrimaryAxisOnly + an X→up attachment): a
+	-- full-frame goal made the Root muscle corkscrew the body toward the
+	-- latched yaw whenever the latch guessed facing wrong (side-lying
+	-- landings are ambiguous) — pelvis inverted at standing height,
+	-- pole-vaulted off the planted feet (measured: minUp −0.97, pY 3.49).
+	-- With yaw free the light ghost yields instead; the body stands
+	-- facing wherever it organically organized.
+	if not hrp:FindFirstChild("GhostUpright") then
+		local att = Instance.new("Attachment")
+		att.Name = "GhostUprightAtt"
+		att.CFrame = CFrame.Angles(0, 0, math.rad(90)) -- primary axis = HRP up
+		att.Parent = hrp
+		local ao = Instance.new("AlignOrientation")
+		ao.Name = "GhostUpright"
+		ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
+		ao.Attachment0 = att
+		ao.PrimaryAxisOnly = true
+		ao.CFrame = CFrame.Angles(0, 0, math.rad(90)) -- goal: that axis = world +Y
+		ao.MaxTorque = 50000
+		ao.Responsiveness = 50
+		ao.Enabled = false
+		ao.Parent = hrp
 	end
 	for _, p in character:GetChildren() do
 		if p:IsA("BasePart") then
